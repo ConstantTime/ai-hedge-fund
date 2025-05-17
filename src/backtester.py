@@ -13,12 +13,12 @@ import itertools
 from src.llm.models import LLM_ORDER, OLLAMA_LLM_ORDER, get_model_info, ModelProvider
 from src.utils.analysts import ANALYST_ORDER
 from src.main import run_hedge_fund
-from src.tools.api import (
-    get_company_news,
+from src.tools.data_source import (
+    get_company_news_wrapper as get_company_news,
     get_price_data,
     get_prices,
     get_financial_metrics,
-    get_insider_trades,
+    get_insider_trades_wrapper as get_insider_trades,
 )
 from src.utils.display import print_backtest_results, format_backtest_row
 from typing_extensions import Callable

@@ -52,6 +52,85 @@ By using this software, you agree to use it solely for learning purposes.
 - [Feature Requests](#feature-requests)
 - [License](#license)
 
+## Introduction
+
+The AI Hedge Fund is a combination of multiple AI agents that analyze market data and collaborate to make investment decisions. Each AI agent is designed to mimic the trading style and strategies of a famous investor (like Warren Buffett, Michael Burry), or a specific trading approach (like technical analysis).
+
+## Indian Stock Market Integration
+
+In addition to US stocks through financialdatasets.ai, this project now supports Indian stocks via Zerodha integration. The system can fetch data from NSE (National Stock Exchange) and process it in the same format used by the AI agents.
+
+### Using Zerodha Integration
+
+To use the Zerodha integration for Indian stocks:
+
+1. Ensure you have a Zerodha account and API credentials
+2. Set the following environment variables:
+   ```
+   export ZERODHA_API_KEY="your_api_key"
+   export ZERODHA_ACCESS_TOKEN="your_access_token"
+   export AI_HEDGE_FUND_DATA_SOURCE="zerodha"
+   ```
+3. Run the hedge fund with Indian stock tickers:
+   ```
+   ./run_with_zerodha.sh --tickers RELIANCE,INFY,HDFCBANK
+   ```
+
+For a backtesting run:
+```
+./run_with_zerodha.sh --tickers RELIANCE,INFY --backtest
+```
+
+If you don't have LLM API keys, you can use Ollama for local inference:
+```
+./run_with_zerodha.sh --tickers RELIANCE,INFY --ollama
+```
+
+### Data Sources
+
+The Zerodha integration provides:
+- Historical OHLCV data via Kite Connect API
+- Basic fundamental metrics via web scraping (Screener.in)
+
+Note that some metrics available for US stocks may not be available for Indian stocks.
+
+### Zerodha-specific Requirements
+
+If you're using the Zerodha integration for Indian stocks, you'll need to install additional dependencies:
+
+```bash
+pip install -r requirements-zerodha.txt
+```
+
+Or with Poetry:
+
+```bash
+poetry add kiteconnect beautifulsoup4 python-dateutil pandas pyarrow fastparquet
+```
+
+### Generating Zerodha Access Token
+
+The Zerodha API requires an access token that is valid for one day. To generate a token:
+
+1. Make sure you have your Zerodha API key and secret from the [Kite Connect Developer Console](https://kite.trade/connect/login/)
+2. Run the token generation script:
+
+```bash
+python generate_zerodha_token.py
+```
+
+Or with your API credentials as arguments:
+
+```bash
+python generate_zerodha_token.py --api-key YOUR_API_KEY --api-secret YOUR_API_SECRET
+```
+
+The script will:
+1. Open a browser window for you to log in to your Zerodha account
+2. Ask you to paste the request token from the redirect URL
+3. Generate and display your access token
+4. Show the export commands to set the required environment variables
+
 ## Setup
 
 ### Using Poetry

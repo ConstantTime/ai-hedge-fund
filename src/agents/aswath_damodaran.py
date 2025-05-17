@@ -8,10 +8,10 @@ from src.graph.state import AgentState, show_agent_reasoning
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 
-from src.tools.api import (
+from src.tools.data_source import (
     get_financial_metrics,
-    get_market_cap,
-    search_line_items,
+    get_price_data,
+    search_line_items as search_line_items,
 )
 from src.utils.llm import call_llm
 from src.utils.progress import progress
@@ -61,7 +61,7 @@ def aswath_damodaran_agent(state: AgentState):
         )
 
         progress.update_status("aswath_damodaran_agent", ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date)
+        market_cap = metrics[0].market_cap if metrics else None
 
         # ─── Analyses ───────────────────────────────────────────────────────────
         progress.update_status("aswath_damodaran_agent", ticker, "Analyzing growth and reinvestment")
