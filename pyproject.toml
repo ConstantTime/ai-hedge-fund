@@ -41,6 +41,7 @@ pyarrow = "^20.0.0"
 fastparquet = "^2024.11.0"
 loguru = "^0.7.3"
 anthropic = "^0.51.0"
+requests = "^2.32.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

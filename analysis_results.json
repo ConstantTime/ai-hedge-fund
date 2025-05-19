@@ -1,0 +1,105 @@
+{
+  "SWSOLAR": {
+    "fundamentals": {
+      "ticker": "SWSOLAR",
+      "scraped_timestamp": "2025-05-19T22:57:22.292880",
+      "screener_url": "https://www.screener.in/company/SWSOLAR/consolidated/",
+      "ratios": {
+        "Market Cap": 6772.0,
+        "Current Price": 290.0,
+        "High / Low": 828.0,
+        "Stock P/E": 83.2,
+        "Book Value": 43.1,
+        "Dividend Yield": 0.0,
+        "ROCE": 16.0,
+        "ROE": 8.24,
+        "Face Value": 1.0
+      },
+      "market_cap": 6772.0,
+      "price": 290.0,
+      "high_low_52_week": 828.0,
+      "pe_ratio": 83.2,
+      "book_value_per_share": 43.1,
+      "dividend_yield": 0.0,
+      "roce": 16.0,
+      "roe": 8.24,
+      "face_value": 1.0,
+      "earnings_per_share": -6.66,
+      "sales": 6872.0,
+      "net_profit": 451.0,
+      "reserves": 181.0,
+      "total_debt": 184.0,
+      "total_liabilities": 4920.0,
+      "total_assets": 4920.0
+    },
+    "analysis": {
+      "price_to_book": 6.728538283062645,
+      "pb_assessment": "High price to book ratio - potentially expensive",
+      "pe_ratio": 83.2,
+      "pe_assessment": "Above market average - potentially expensive",
+      "eps": -6.66,
+      "eps_assessment": "Negative earnings - company is not profitable",
+      "roe": 8.24,
+      "roe_assessment": "Below average return on equity",
+      "strengths": [],
+      "weaknesses": [
+        "High P/E ratio",
+        "High P/B ratio",
+        "Negative earnings",
+        "Weak ROE"
+      ],
+      "overall_assessment": "Generally negative outlook"
+    }
+  },
+  "IDFCFIRSTB": {
+    "fundamentals": {
+      "ticker": "IDFCFIRSTB",
+      "scraped_timestamp": "2025-05-19T22:57:24.486648",
+      "screener_url": "https://www.screener.in/company/IDFCFIRSTB/consolidated/",
+      "ratios": {
+        "Market Cap": 50312.0,
+        "Current Price": 68.7,
+        "High / Low": 84.5,
+        "Stock P/E": 33.8,
+        "Book Value": 51.9,
+        "Dividend Yield": 0.0,
+        "ROCE": 6.22,
+        "ROE": 4.24,
+        "Face Value": 10.0
+      },
+      "market_cap": 50312.0,
+      "price": 68.7,
+      "high_low_52_week": 84.5,
+      "pe_ratio": 33.8,
+      "book_value_per_share": 51.9,
+      "dividend_yield": 0.0,
+      "roce": 6.22,
+      "roe": 4.24,
+      "face_value": 10.0,
+      "earnings_per_share": 0.57,
+      "net_profit": 1019.0,
+      "reserves": 11278.0,
+      "total_liabilities": 112064.0,
+      "total_assets": 112064.0
+    },
+    "analysis": {
+      "price_to_book": 1.323699421965318,
+      "pb_assessment": "Reasonable price to book ratio",
+      "pe_ratio": 33.8,
+      "pe_assessment": "Above market average - potentially expensive",
+      "eps": 0.57,
+      "eps_assessment": "Positive earnings",
+      "roe": 4.24,
+      "roe_assessment": "Below average return on equity",
+      "strengths": [
+        "Low P/B ratio",
+        "Positive earnings"
+      ],
+      "weaknesses": [
+        "High P/E ratio",
+        "Weak ROE"
+      ],
+      "overall_assessment": "Mixed outlook"
+    }
+  }
+}

@@ -8,7 +8,10 @@ from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
 import math
+import logging
 
+# Get the logger for this module
+logger = logging.getLogger(__name__)
 
 class BenGrahamSignal(BaseModel):
     signal: Literal["bullish", "bearish", "neutral"]
@@ -104,10 +107,20 @@ def analyze_earnings_stability(metrics: list, financial_line_items: list) -> dic
     if not metrics or not financial_line_items:
         return {"score": score, "details": "Insufficient data for earnings stability analysis"}
 
+    # Safety check: ensure we have at least one item with EPS
+    has_eps_data = any(hasattr(item, 'earnings_per_share') and item.earnings_per_share is not None for item in financial_line_items)
+    if not has_eps_data:
+        return {"score": score, "details": "No earnings per share data available"}
+        
     eps_vals = []
     for item in financial_line_items:
-        if item.earnings_per_share is not None:
-            eps_vals.append(item.earnings_per_share)
+        # Enhanced safety check for attribute existence
+        try:
+            if hasattr(item, 'earnings_per_share') and item.earnings_per_share is not None:
+                eps_vals.append(item.earnings_per_share)
+        except Exception as e:
+            logger.warning(f"Error accessing earnings_per_share attribute: {e}")
+            # Continue with other items
 
     if len(eps_vals) < 2:
         details.append("Not enough multi-year EPS data.")
@@ -147,13 +160,32 @@ def analyze_financial_strength(financial_line_items: list) -> dict:
         return {"score": score, "details": "No data for financial strength analysis"}
 
     latest_item = financial_line_items[0]
-    total_assets = latest_item.total_assets or 0
-    total_liabilities = latest_item.total_liabilities or 0
-    current_assets = latest_item.current_assets or 0
-    current_liabilities = latest_item.current_liabilities or 0
+    
+    # Safety check for attribute existence
+    has_balance_sheet_data = (
+        hasattr(latest_item, 'total_assets') and 
+        hasattr(latest_item, 'total_liabilities') and 
+        hasattr(latest_item, 'current_assets') and 
+        hasattr(latest_item, 'current_liabilities')
+    )
+    
+    if not has_balance_sheet_data:
+        details.append("Missing essential balance sheet data for financial strength analysis.")
+        # Continue with partial analysis if some data is available
+    
+    # Safe attribute access with default of 0
+    try:
+        total_assets = latest_item.total_assets if hasattr(latest_item, 'total_assets') and latest_item.total_assets is not None else 0
+        total_liabilities = latest_item.total_liabilities if hasattr(latest_item, 'total_liabilities') and latest_item.total_liabilities is not None else 0
+        current_assets = latest_item.current_assets if hasattr(latest_item, 'current_assets') and latest_item.current_assets is not None else 0
+        current_liabilities = latest_item.current_liabilities if hasattr(latest_item, 'current_liabilities') and latest_item.current_liabilities is not None else 0
+    except Exception as e:
+        logger.warning(f"Error accessing balance sheet attributes: {e}")
+        total_assets = total_liabilities = current_assets = current_liabilities = 0
+        details.append("Error accessing balance sheet data.")
 
     # 1. Current ratio
-    if current_liabilities > 0:
+    if current_assets > 0 and current_liabilities > 0:
         current_ratio = current_assets / current_liabilities
         if current_ratio >= 2.0:
             score += 2
@@ -164,10 +196,10 @@ def analyze_financial_strength(financial_line_items: list) -> dict:
         else:
             details.append(f"Current ratio = {current_ratio:.2f} (<1.5: weaker liquidity).")
     else:
-        details.append("Cannot compute current ratio (missing or zero current_liabilities).")
+        details.append("Cannot compute current ratio (missing or zero current_assets/current_liabilities).")
 
     # 2. Debt vs. Assets
-    if total_assets > 0:
+    if total_assets > 0 and total_liabilities is not None:
         debt_ratio = total_liabilities / total_assets
         if debt_ratio < 0.5:
             score += 2
@@ -178,25 +210,34 @@ def analyze_financial_strength(financial_line_items: list) -> dict:
         else:
             details.append(f"Debt ratio = {debt_ratio:.2f}, quite high by Graham standards.")
     else:
-        details.append("Cannot compute debt ratio (missing total_assets).")
+        details.append("Cannot compute debt ratio (missing total_assets or total_liabilities).")
 
-    # 3. Dividend track record
-    div_periods = [item.dividends_and_other_cash_distributions for item in financial_line_items if item.dividends_and_other_cash_distributions is not None]
-    if div_periods:
-        # In many data feeds, dividend outflow is shown as a negative number
-        # (money going out to shareholders). We'll consider any negative as 'paid a dividend'.
-        div_paid_years = sum(1 for d in div_periods if d < 0)
-        if div_paid_years > 0:
-            # e.g. if at least half the periods had dividends
-            if div_paid_years >= (len(div_periods) // 2 + 1):
-                score += 1
-                details.append("Company paid dividends in the majority of the reported years.")
+    # 3. Dividend track record - handle attribute absence gracefully
+    try:
+        div_periods = []
+        for item in financial_line_items:
+            if (hasattr(item, 'dividends_and_other_cash_distributions') and 
+                item.dividends_and_other_cash_distributions is not None):
+                div_periods.append(item.dividends_and_other_cash_distributions)
+                
+        if div_periods:
+            # In many data feeds, dividend outflow is shown as a negative number
+            # (money going out to shareholders). We'll consider any negative as 'paid a dividend'.
+            div_paid_years = sum(1 for d in div_periods if d < 0)
+            if div_paid_years > 0:
+                # e.g. if at least half the periods had dividends
+                if div_paid_years >= (len(div_periods) // 2 + 1):
+                    score += 1
+                    details.append("Company paid dividends in the majority of the reported years.")
+                else:
+                    details.append("Company has some dividend payments, but not most years.")
             else:
-                details.append("Company has some dividend payments, but not most years.")
+                details.append("Company did not pay dividends in these periods.")
         else:
-            details.append("Company did not pay dividends in these periods.")
-    else:
-        details.append("No dividend data available to assess payout consistency.")
+            details.append("No dividend data available to assess payout consistency.")
+    except Exception as e:
+        logger.warning(f"Error processing dividend data: {e}")
+        details.append("Error analyzing dividend history.")
 
     return {"score": score, "details": "; ".join(details)}
 
@@ -208,41 +249,58 @@ def analyze_valuation_graham(financial_line_items: list, market_cap: float) -> d
     2. Graham Number: sqrt(22.5 * EPS * Book Value per Share)
     3. Compare per-share price to Graham Number => margin of safety
     """
-    if not financial_line_items or not market_cap or market_cap <= 0:
-        return {"score": 0, "details": "Insufficient data to perform valuation"}
+    if not financial_line_items:
+        return {"score": 0, "details": "No financial line items available for valuation"}
+        
+    if not market_cap or market_cap <= 0:
+        return {"score": 0, "details": "Missing or invalid market cap for valuation"}
 
     latest = financial_line_items[0]
-    current_assets = latest.current_assets or 0
-    total_liabilities = latest.total_liabilities or 0
-    book_value_ps = latest.book_value_per_share or 0
-    eps = latest.earnings_per_share or 0
-    shares_outstanding = latest.outstanding_shares or 0
-
     details = []
     score = 0
+    
+    # Safety checks for attribute existence and safe access
+    try:
+        # Use safe attribute access with None as default
+        current_assets = latest.current_assets if hasattr(latest, 'current_assets') and latest.current_assets is not None else 0
+        total_liabilities = latest.total_liabilities if hasattr(latest, 'total_liabilities') and latest.total_liabilities is not None else 0
+        book_value_ps = latest.book_value_per_share if hasattr(latest, 'book_value_per_share') and latest.book_value_per_share is not None else 0
+        eps = latest.earnings_per_share if hasattr(latest, 'earnings_per_share') and latest.earnings_per_share is not None else 0
+        shares_outstanding = latest.outstanding_shares if hasattr(latest, 'outstanding_shares') and latest.outstanding_shares is not None else 0
+    except Exception as e:
+        logger.warning(f"Error accessing valuation attributes: {e}")
+        return {"score": 0, "details": f"Error accessing valuation data: {str(e)}"}
+    
+    # Check if we have enough data for meaningful analysis
+    if current_assets == 0 and total_liabilities == 0 and book_value_ps == 0 and eps == 0:
+        return {"score": 0, "details": "Insufficient fundamental data for Graham valuation analysis"}
 
     # 1. Net-Net Check
     #   NCAV = Current Assets - Total Liabilities
     #   If NCAV > Market Cap => historically a strong buy signal
-    net_current_asset_value = current_assets - total_liabilities
-    if net_current_asset_value > 0 and shares_outstanding > 0:
-        net_current_asset_value_per_share = net_current_asset_value / shares_outstanding
-        price_per_share = market_cap / shares_outstanding if shares_outstanding else 0
+    if current_assets > 0 and total_liabilities is not None:
+        net_current_asset_value = current_assets - total_liabilities
+        
+        if net_current_asset_value > 0 and shares_outstanding > 0:
+            net_current_asset_value_per_share = net_current_asset_value / shares_outstanding
+            price_per_share = market_cap / shares_outstanding
 
-        details.append(f"Net Current Asset Value = {net_current_asset_value:,.2f}")
-        details.append(f"NCAV Per Share = {net_current_asset_value_per_share:,.2f}")
-        details.append(f"Price Per Share = {price_per_share:,.2f}")
+            details.append(f"Net Current Asset Value = {net_current_asset_value:,.2f}")
+            details.append(f"NCAV Per Share = {net_current_asset_value_per_share:,.2f}")
+            details.append(f"Price Per Share = {price_per_share:,.2f}")
 
-        if net_current_asset_value > market_cap:
-            score += 4  # Very strong Graham signal
-            details.append("Net-Net: NCAV > Market Cap (classic Graham deep value).")
+            if net_current_asset_value > market_cap:
+                score += 4  # Very strong Graham signal
+                details.append("Net-Net: NCAV > Market Cap (classic Graham deep value).")
+            else:
+                # For partial net-net discount
+                if net_current_asset_value_per_share >= (price_per_share * 0.67):
+                    score += 2
+                    details.append("NCAV Per Share >= 2/3 of Price Per Share (moderate net-net discount).")
         else:
-            # For partial net-net discount
-            if net_current_asset_value_per_share >= (price_per_share * 0.67):
-                score += 2
-                details.append("NCAV Per Share >= 2/3 of Price Per Share (moderate net-net discount).")
+            details.append("Cannot compute per-share NCAV (missing outstanding shares data).")
     else:
-        details.append("NCAV not exceeding market cap or insufficient data for net-net approach.")
+        details.append("Cannot compute NCAV (missing current assets or total liabilities data).")
 
     # 2. Graham Number
     #   GrahamNumber = sqrt(22.5 * EPS * BVPS).
@@ -250,27 +308,36 @@ def analyze_valuation_graham(financial_line_items: list, market_cap: float) -> d
     #   If GrahamNumber >> price, indicates undervaluation
     graham_number = None
     if eps > 0 and book_value_ps > 0:
-        graham_number = math.sqrt(22.5 * eps * book_value_ps)
-        details.append(f"Graham Number = {graham_number:.2f}")
+        try:
+            graham_number = math.sqrt(22.5 * eps * book_value_ps)
+            details.append(f"Graham Number = {graham_number:.2f}")
+        except (ValueError, TypeError) as e:
+            details.append(f"Error calculating Graham Number: {e}")
     else:
-        details.append("Unable to compute Graham Number (EPS or Book Value missing/<=0).")
+        if eps <= 0:
+            details.append("Unable to compute Graham Number (EPS missing, negative, or zero).")
+        if book_value_ps <= 0:
+            details.append("Unable to compute Graham Number (Book Value missing, negative, or zero).")
 
     # 3. Margin of Safety relative to Graham Number
     if graham_number and shares_outstanding > 0:
-        current_price = market_cap / shares_outstanding
-        if current_price > 0:
-            margin_of_safety = (graham_number - current_price) / current_price
-            details.append(f"Margin of Safety (Graham Number) = {margin_of_safety:.2%}")
-            if margin_of_safety > 0.5:
-                score += 3
-                details.append("Price is well below Graham Number (>=50% margin).")
-            elif margin_of_safety > 0.2:
-                score += 1
-                details.append("Some margin of safety relative to Graham Number.")
+        try:
+            current_price = market_cap / shares_outstanding
+            if current_price > 0:
+                margin_of_safety = (graham_number - current_price) / current_price
+                details.append(f"Margin of Safety (Graham Number) = {margin_of_safety:.2%}")
+                if margin_of_safety > 0.5:
+                    score += 3
+                    details.append("Price is well below Graham Number (>=50% margin).")
+                elif margin_of_safety > 0.2:
+                    score += 1
+                    details.append("Some margin of safety relative to Graham Number.")
+                else:
+                    details.append("Price close to or above Graham Number, low margin of safety.")
             else:
-                details.append("Price close to or above Graham Number, low margin of safety.")
-        else:
-            details.append("Current price is zero or invalid; can't compute margin of safety.")
+                details.append("Current price is zero or invalid; can't compute margin of safety.")
+        except Exception as e:
+            details.append(f"Error calculating margin of safety: {e}")
     # else: already appended details for missing graham_number
 
     return {"score": score, "details": "; ".join(details)}

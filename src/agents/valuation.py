@@ -65,21 +65,31 @@ def valuation_analyst_agent(state: AgentState):
         # ------------------------------------------------------------------
         # Valuation models
         # ------------------------------------------------------------------
-        wc_change = li_curr.working_capital - li_prev.working_capital
+        # Safely access working_capital with fallback for missing attributes
+        wc_curr = getattr(li_curr, 'working_capital', 0) or 0
+        wc_prev = getattr(li_prev, 'working_capital', 0) or 0
+        wc_change = wc_curr - wc_prev
 
-        # Owner Earnings
+        # Owner Earnings - with safe attribute access
+        net_income = getattr(li_curr, 'net_income', 0) or 0
+        depreciation = getattr(li_curr, 'depreciation_and_amortization', 0) or 0
+        capex = getattr(li_curr, 'capital_expenditure', 0) or 0
+        growth_rate = getattr(most_recent_metrics, 'earnings_growth', None) or 0.05
+        
         owner_val = calculate_owner_earnings_value(
-            net_income=li_curr.net_income,
-            depreciation=li_curr.depreciation_and_amortization,
-            capex=li_curr.capital_expenditure,
+            net_income=net_income,
+            depreciation=depreciation,
+            capex=capex,
             working_capital_change=wc_change,
-            growth_rate=most_recent_metrics.earnings_growth or 0.05,
+            growth_rate=growth_rate,
         )
 
-        # Discounted Cash Flow
+        # Discounted Cash Flow - with safe attribute access
+        free_cash_flow = getattr(li_curr, 'free_cash_flow', 0) or 0
+        
         dcf_val = calculate_intrinsic_value(
-            free_cash_flow=li_curr.free_cash_flow,
-            growth_rate=most_recent_metrics.earnings_growth or 0.05,
+            free_cash_flow=free_cash_flow,
+            growth_rate=growth_rate,
             discount_rate=0.10,
             terminal_growth_rate=0.03,
             num_years=5,
@@ -88,12 +98,16 @@ def valuation_analyst_agent(state: AgentState):
         # Implied Equity Value
         ev_ebitda_val = calculate_ev_ebitda_value(financial_metrics)
 
-        # Residual Income Model
+        # Residual Income Model - with safe attribute access
+        market_cap = getattr(most_recent_metrics, 'market_cap', 0) or 0
+        price_to_book_ratio = getattr(most_recent_metrics, 'price_to_book_ratio', 0) or 0
+        book_value_growth = getattr(most_recent_metrics, 'book_value_growth', None) or 0.03
+        
         rim_val = calculate_residual_income_value(
-            market_cap=most_recent_metrics.market_cap,
-            net_income=li_curr.net_income,
-            price_to_book_ratio=most_recent_metrics.price_to_book_ratio,
-            book_value_growth=most_recent_metrics.book_value_growth or 0.03,
+            market_cap=market_cap,
+            net_income=net_income,
+            price_to_book_ratio=price_to_book_ratio,
+            book_value_growth=book_value_growth,
         )
 
         # ------------------------------------------------------------------
