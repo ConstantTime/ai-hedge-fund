@@ -116,13 +116,11 @@ The Zerodha API requires an access token that is valid for one day. To generate 
 2. Run the token generation script:
 
 ```bash
-python generate_zerodha_token.py
-```
+# Using Poetry (recommended)
+poetry run python generate_zerodha_token.py
 
-Or with your API credentials as arguments:
-
-```bash
-python generate_zerodha_token.py --api-key YOUR_API_KEY --api-secret YOUR_API_SECRET
+# Or with API credentials as arguments
+poetry run python generate_zerodha_token.py --api-key YOUR_API_KEY --api-secret YOUR_API_SECRET
 ```
 
 The script will:

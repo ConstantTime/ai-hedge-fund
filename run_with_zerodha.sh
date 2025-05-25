@@ -2,6 +2,11 @@
 
 # This script runs the AI Hedge Fund with Zerodha as the data source for Indian stocks
 
+# Debug: Print environment variables for debugging
+echo "DEBUG: Environment variables in run_with_zerodha.sh before loading .env:"
+echo "ZERODHA_API_KEY: ${ZERODHA_API_KEY:0:5}... (truncated)"
+echo "ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:0:5}... (truncated)"
+
 # Load environment variables from .env file
 if [ -f ".env" ]; then
     echo "Loading environment variables from .env file"
@@ -9,6 +14,11 @@ if [ -f ".env" ]; then
 else
     echo "Warning: .env file not found"
 fi
+
+# Debug: Print environment variables again after loading .env
+echo "DEBUG: Environment variables in run_with_zerodha.sh after loading .env:"
+echo "ZERODHA_API_KEY: ${ZERODHA_API_KEY:0:5}... (truncated)"
+echo "ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:0:5}... (truncated)"
 
 # Set environment variables
 export AI_HEDGE_FUND_DATA_SOURCE="zerodha"
