@@ -10,6 +10,16 @@ from bs4 import BeautifulSoup
 import re
 import math
 import json
+import time
+from threading import Lock
+
+# Try to import nsepy for historical data fallback
+try:
+    from nsepy import get_history
+    has_nsepy = True
+except ImportError:
+    has_nsepy = False
+    get_history = None  # Fallback if nsepy not installed
 
 # Import existing models to match the interface
 from src.data.models import (
@@ -29,6 +39,22 @@ FUNDAMENTALS_CACHE_DIR = CACHE_DIR / "fundamentals"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 HISTORICAL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 FUNDAMENTALS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Rate limiter for screener.in requests
+_screener_lock = Lock()
+_last_screener_request = 0.0
+
+def _rate_limited_get(url, headers, timeout):
+    """Perform a GET with at least 1s between successive calls."""
+    global _last_screener_request
+    with _screener_lock:
+        now = time.time()
+        wait = 1.0 - (now - _last_screener_request)
+        if wait > 0:
+            time.sleep(wait)
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        _last_screener_request = time.time()
+        return resp
 
 # Helper to parse numeric strings from Screener (moved here, made static or module level)
 def _parse_screener_number(value_text: str) -> float | None:
@@ -60,21 +86,42 @@ def _parse_screener_number(value_text: str) -> float | None:
         return None
         
     try:
-        num = float(cleaned_text)
+        num = float(cleaned_text) # Attempt direct conversion
         num *= crore_multiplier
         if is_percentage: # Apply percentage division if '%' was present
             num /= 100.0
         return num
     except ValueError:
-        logger.warning(f"Could not parse number: '{value_text}' (cleaned: '{cleaned_text}')")
+        # If float conversion fails, log it and return None
+        logger.warning(f"Could not parse 'cleaned_text' to float: '{cleaned_text}' (original: '{value_text}')")
         return None
 
 class ZerodhaAdapter:
     """Adapter to fetch data from Zerodha and convert it to match financialdatasets.ai format."""
     
+    # Singleton instance
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls, force_reinit=False):
+        """Get singleton instance, creating it if it doesn't exist or force_reinit is True"""
+        if cls._instance is None or force_reinit:
+            cls._instance = cls()
+            # Log the status of initialization with more details
+            if cls._instance.kite:
+                logger.info(f"ZerodhaAdapter singleton initialized successfully with API key: {cls._instance.api_key[:5]}... and token: {cls._instance.access_token[:5]}...")
+            else:
+                logger.error(f"ZerodhaAdapter singleton initialization FAILED. API key present: {'Yes' if cls._instance.api_key else 'No'}, Token present: {'Yes' if cls._instance.access_token else 'No'}")
+        return cls._instance
+    
     def __init__(self):
-        self.api_key = os.environ.get("ZERODHA_API_KEY")
-        self.access_token = os.environ.get("ZERODHA_ACCESS_TOKEN")
+        # Log environment variables for debugging
+        env_api_key = os.environ.get("ZERODHA_API_KEY")
+        env_token = os.environ.get("ZERODHA_ACCESS_TOKEN")
+        logger.info(f"ZerodhaAdapter init - Environment has API key: {'Yes' if env_api_key else 'No'}, Token: {'Yes' if env_token else 'No'}")
+        
+        self.api_key = env_api_key
+        self.access_token = env_token
         self.kite = None
         
         # Try to initialize the Kite Connect client if credentials are available
@@ -88,8 +135,15 @@ class ZerodhaAdapter:
                 logger.error(f"ZerodhaAdapter: Error initializing KiteConnect: {e}")
                 self.kite = None
         else:
-            logger.warning("ZerodhaAdapter: Zerodha API Key or Access Token not found in environment variables")
-            
+            error_msg = "ZerodhaAdapter: Zerodha API Key or Access Token not found in environment variables"
+            logger.error(error_msg)
+            logger.error("Make sure these are set in your .env file:")
+            logger.error("ZERODHA_API_KEY=your_api_key")
+            logger.error("ZERODHA_ACCESS_TOKEN=your_access_token")
+            logger.error("You can generate these by running: poetry run python generate_zerodha_token.py")
+            # We don't raise an exception here to allow code to continue initializing,
+            # but operations that require Kite will fail with clear error messages
+
     def get_instrument_token(self, ticker: str, exchange: str = "NSE") -> Optional[int]:
         """Get the instrument token for a given ticker symbol."""
         try:
@@ -133,7 +187,17 @@ class ZerodhaAdapter:
             return None
     
     def get_historical_data(self, ticker: str, start_date: str, end_date: str, interval: str = "day") -> pd.DataFrame:
-        """Fetch historical data for a ticker using Zerodha's API or cache."""
+        """Fetch historical data for a ticker using Zerodha's API or cache.
+        
+        Args:
+            ticker: Trading symbol of the instrument
+            start_date: Start date in the format YYYY-MM-DD
+            end_date: End date in the format YYYY-MM-DD
+            interval: Candle interval (minute, day, 3minute, 5minute, 10minute, 15minute, 30minute, 60minute)
+            
+        Returns:
+            DataFrame with columns: date, open, high, low, close, volume
+        """
         # Generate cache file path
         cache_file = HISTORICAL_CACHE_DIR / f"{ticker}_{start_date}_{end_date}_{interval}.parquet"
         
@@ -141,55 +205,114 @@ class ZerodhaAdapter:
         if cache_file.exists():
             try:
                 logger.info(f"Loading historical data for {ticker} from cache: {cache_file}")
-                return pd.read_parquet(cache_file)
+                df = pd.read_parquet(cache_file)
+                # Check if this is synthetic data by looking for extreme uniformity in prices
+                if len(df) > 0 and abs(df['close'].std() / df['close'].mean()) < 0.05:
+                    # This is likely synthetic data with very low volatility
+                    logger.warning(f"Detected likely synthetic data in cache for {ticker}. Removing and fetching again.")
+                    os.remove(cache_file)
+                    # Fall through to fetch real data
+                else:
+                    return df
             except Exception as e:
                 logger.error(f"Error reading historical cache file {cache_file}: {e}. Fetching again.")
         
-        # If not in cache, get the data
+        # If not in cache or we need to refresh, get the data
         try:
             # Convert date strings to datetime objects
             from_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
             to_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
             
+            # Format dates for API request
+            from_date_str = from_date.strftime('%Y-%m-%d %H:%M:%S')
+            to_date_str = to_date.strftime('%Y-%m-%d %H:%M:%S')
+            
             # Check if Kite is available
-            if self.kite:
-                # Get the instrument token
-                instrument_token = self.get_instrument_token(ticker)
-                if instrument_token:
-                    # Fetch from Kite
-                    logger.info(f"Fetching historical data for {ticker} from Kite API")
-                    kite_interval = "day"  # Default interval
-                    if interval == "minute":
-                        kite_interval = "minute"
-                    elif interval == "hour":
-                        kite_interval = "60minute"
-                        
-                    records = self.kite.historical_data(instrument_token, from_date, to_date, kite_interval)
-                    df = pd.DataFrame(records)
+            if not self.kite:
+                error_msg = (
+                    f"Cannot fetch historical data for {ticker} - Zerodha credentials missing or invalid.\n"
+                    f"Make sure ZERODHA_API_KEY and ZERODHA_ACCESS_TOKEN are set in your .env file.\n"
+                    f"Run: poetry run python generate_zerodha_token.py to generate a new token."
+                )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+                
+            # Get the instrument token
+            instrument_token = self.get_instrument_token(ticker)
+            if not instrument_token:
+                error_msg = f"Could not find instrument token for {ticker}. Make sure it's a valid NSE symbol."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+            # Fetch from Kite
+            logger.info(f"Fetching historical data for {ticker} (token: {instrument_token}) from Kite API")
+            
+            # Map our interval parameter to Kite's format
+            kite_interval = interval  # Most intervals match directly
+            if interval == "hour":
+                kite_interval = "60minute"
+                
+            try:
+                # Log API call parameters
+                logger.info(f"ZERODHA API CALL: historical_data(instrument_token={instrument_token}, from_date={from_date_str}, to_date={to_date_str}, interval={kite_interval})")
+                
+                # Record start time for timing
+                start_time = time.time()
+                
+                # Use historical_data method according to Kite Connect docs
+                records = self.kite.historical_data(
+                    instrument_token=instrument_token,
+                    from_date=from_date_str,
+                    to_date=to_date_str,
+                    interval=kite_interval,
+                    continuous=False,
+                    oi=False
+                )
+                
+                # Calculate and log API call duration
+                duration = time.time() - start_time
+                logger.info(f"ZERODHA API RESPONSE TIME: historical_data for {ticker} took {duration:.2f} seconds")
+                
+                # Log response (truncated if very large)
+                if records:
+                    sample_size = min(3, len(records))
+                    logger.info(f"ZERODHA API RESPONSE: Got {len(records)} records for {ticker}. First {sample_size} records: {records[:sample_size]}")
+                else:
+                    logger.error(f"ZERODHA API RESPONSE: No data returned for {ticker}")
+                
+                if not records:
+                    error_msg = f"No historical data returned for {ticker}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                     
-                    if not df.empty:
-                        # Convert date column to datetime and remove timezone
-                        df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
-                        
-                        # Cache the result
-                        try:
-                            df.to_parquet(cache_file)
-                            logger.info(f"Saved historical data for {ticker} to cache: {cache_file}")
-                        except Exception as e:
-                            logger.error(f"Failed to save historical data to cache: {e}")
-                        
-                        return df
-            
-            logger.warning(f"Could not fetch historical data for {ticker} from Kite. Trying alternative...")
-            
-            # Fallback to NSE Bhavcopy data (requires implementing get_bhavcopy)
-            # This would be implemented similar to fin-agent-india's nse_fetcher.py
-            # For now, return empty DataFrame
-            return pd.DataFrame()
+                # Convert to DataFrame
+                df = pd.DataFrame(records)
+                
+                # Make sure we have all required columns
+                if not df.empty and all(col in df.columns for col in ['date', 'open', 'high', 'low', 'close', 'volume']):
+                    # Convert date column to datetime and remove timezone
+                    df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
+                    
+                    # Cache the result
+                    try:
+                        df.to_parquet(cache_file)
+                        logger.info(f"Saved historical data for {ticker} to cache: {cache_file}")
+                    except Exception as e:
+                        logger.error(f"Failed to save historical data to cache: {e}")
+                    
+                    return df
+                else:
+                    error_msg = f"Received unexpected data format for {ticker}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+            except Exception as e:
+                error_msg = f"Error fetching historical data from Kite API for {ticker}: {e}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
             
         except Exception as e:
             logger.error(f"Error fetching historical data for {ticker}: {e}")
-            return pd.DataFrame()
+            raise e  # Re-raise to let caller handle it
     
     def get_fundamentals(self, ticker: str, consolidated: bool = True) -> dict:
         """Get fundamental data for a ticker using screener.in for real data."""
@@ -201,7 +324,9 @@ class ZerodhaAdapter:
             try:
                 logger.info(f"Loading fundamentals for {ticker} from cache: {cache_file}")
                 with open(cache_file, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    logger.info(f"CACHED FUNDAMENTALS: {ticker} has {len(data)} data points including {', '.join(list(data.keys())[:5])}...")
+                    return data
             except Exception as e:
                 logger.error(f"Error reading fundamentals cache file {cache_file}: {e}. Will fetch fresh data.")
         
@@ -218,8 +343,19 @@ class ZerodhaAdapter:
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
             }
             url_tried = url
-            response = requests.get(url, headers=headers, timeout=20)
-            logger.info(f"Screener.in response status for {ticker} ({cache_suffix}): {response.status_code}")
+            
+            # Log API call
+            logger.info(f"SCREENER.IN API CALL: GET {url_tried}")
+            
+            # Record start time
+            start_time = time.time()
+            
+            response = _rate_limited_get(url, headers=headers, timeout=20)
+            
+            # Calculate and log API call duration
+            duration = time.time() - start_time
+            logger.info(f"SCREENER.IN API RESPONSE TIME: Request for {ticker} ({cache_suffix}) took {duration:.2f} seconds")
+            logger.info(f"SCREENER.IN API RESPONSE: Status {response.status_code} for {ticker} ({cache_suffix})")
             
             # If consolidated fails (HTTP 404) and we were trying consolidated, try standalone as a fallback
             if response.status_code == 404 and consolidated:
@@ -227,8 +363,19 @@ class ZerodhaAdapter:
                 url = f"https://www.screener.in/company/{ticker}/"
                 url_tried = url
                 cache_suffix = "standalone" # Update suffix for correct caching if standalone succeeds
-                response = requests.get(url, headers=headers, timeout=20)
-                logger.info(f"Screener.in response status for {ticker} (standalone): {response.status_code}")
+                
+                # Log fallback API call
+                logger.info(f"SCREENER.IN FALLBACK API CALL: GET {url_tried}")
+                
+                # Record start time for fallback
+                start_time = time.time()
+                
+                response = _rate_limited_get(url, headers=headers, timeout=20)
+                
+                # Calculate and log fallback API call duration
+                duration = time.time() - start_time
+                logger.info(f"SCREENER.IN FALLBACK API RESPONSE TIME: Request for {ticker} (standalone) took {duration:.2f} seconds")
+                logger.info(f"SCREENER.IN FALLBACK API RESPONSE: Status {response.status_code} for {ticker} (standalone)")
 
             if response.status_code != 200:
                 logger.error(f"Failed to fetch data for {ticker} from screener.in: HTTP {response.status_code} at {url_tried}")
@@ -239,6 +386,10 @@ class ZerodhaAdapter:
                      logger.info(f"Attempting to load from cache {final_cache_file} after fetch failure.")
                      with open(final_cache_file, 'r') as f: return json.load(f)
                 return {"error": f"HTTP {response.status_code}", "ticker": ticker, "url_tried": url_tried}
+
+            # Log headers and response size (not full content as it could be very large)
+            logger.info(f"SCREENER.IN RESPONSE HEADERS: {dict(response.headers)}")
+            logger.info(f"SCREENER.IN RESPONSE SIZE: {len(response.text)} bytes")
 
             soup = BeautifulSoup(response.text, 'html.parser')
             fundamentals_data = {"ticker": ticker}
@@ -457,7 +608,7 @@ class ZerodhaAdapter:
             return {"error": str(e), "ticker": ticker, "url_tried": url_tried}
 
 # Adapter for the financialdatasets.ai API interface
-zerodha_adapter = ZerodhaAdapter()
+zerodha_adapter = ZerodhaAdapter.get_instance()
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> List[Price]:
     """Fetch price data from Zerodha and convert to financialdatasets.ai format."""
@@ -637,45 +788,79 @@ def search_line_items(ticker: str, line_items: list[str], end_date: str, period:
     # get_fundamentals, and this search_line_items is for *other* specific line items
     # not covered there, or for historical series of those line items.
 
-    all_fundamental_data = ZerodhaAdapter().get_fundamentals(ticker)
+    all_fundamental_data = ZerodhaAdapter.get_instance().get_fundamentals(ticker)
+    results = []
+    current_year = datetime.datetime.strptime(end_date, "%Y-%m-%d").year
+
+    # Define a helper to safely cast to float or return None
+    def safe_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert value '{value}' (type: {type(value)}) to float for {ticker} in search_line_items. Setting to None.")
+            return None
 
     for i in range(limit):
-        report_date = datetime.date(current_year - i, 12, 31) # Mocking annual data
-        
-        # Create a dictionary to hold values for the current LineItem
+        report_date = datetime.date(current_year - i, 12, 31)
         line_item_values = {
-            "date": report_date.isoformat(), 
+            "date": report_date.isoformat(),
             "period": period,
-            # Add required fields to fix validation errors
             "ticker": ticker,
-            "report_period": period,
-            "currency": "INR"  # Set default currency for Indian stocks
+            "report_period": period, # This seems to be duplicated with 'period', might need review
+            "currency": "INR"
         }
 
         for item_name in line_items:
-            # Try to get from our detailed fundamentals fetch if available
-            # This mapping is illustrative.
+            raw_value = None
+            # Attempt to get value from all_fundamental_data based on common mappings
+            # This mapping needs to be comprehensive for all fields agents might request.
             if item_name == "earnings_per_share" and "earnings_per_share" in all_fundamental_data:
-                line_item_values[item_name] = all_fundamental_data["earnings_per_share"]
+                raw_value = all_fundamental_data["earnings_per_share"]
             elif item_name == "book_value_per_share" and "book_value_per_share" in all_fundamental_data:
-                line_item_values[item_name] = all_fundamental_data["book_value_per_share"]
-            elif item_name == "revenue" and "sales" in all_fundamental_data: # map 'revenue' to 'sales'
-                 line_item_values[item_name] = all_fundamental_data["sales"]
-            # Add more mappings as needed from all_fundamental_data
+                raw_value = all_fundamental_data["book_value_per_share"]
+            elif item_name == "revenue" and "sales" in all_fundamental_data:
+                raw_value = all_fundamental_data["sales"]
+            elif item_name == "net_income" and "net_profit" in all_fundamental_data: # Common mapping
+                raw_value = all_fundamental_data["net_profit"]
+            elif item_name == "operating_income" and "operating_profit" in all_fundamental_data: # Common mapping
+                 raw_value = all_fundamental_data.get("operating_profit") # Use .get for safety
+            elif item_name == "gross_margin" and "gross_profit_margin" in all_fundamental_data: # Example
+                 raw_value = all_fundamental_data.get("gross_profit_margin")
+            elif item_name == "operating_margin" and "operating_margin" in all_fundamental_data:
+                 raw_value = all_fundamental_data.get("operating_margin")
+            elif item_name == "free_cash_flow" and "free_cash_flow" in all_fundamental_data: # Check if Screener provides FCF directly
+                 raw_value = all_fundamental_data.get("free_cash_flow")
+            elif item_name == "capital_expenditure" and "capex" in all_fundamental_data:
+                 raw_value = all_fundamental_data.get("capex")
+            elif item_name == "cash_and_equivalents" and "cash_equivalents" in all_fundamental_data: # Check Screener output for this
+                 raw_value = all_fundamental_data.get("cash_equivalents")
+            elif item_name == "total_debt" and "total_debt" in all_fundamental_data:
+                 raw_value = all_fundamental_data.get("total_debt")
+            elif item_name == "shareholders_equity" and "total_equity" in all_fundamental_data:
+                 raw_value = all_fundamental_data.get("total_equity")
+            # Ensure other fields requested by Peter Lynch are also mapped and casted
+            # For 'outstanding_shares', it's usually a large integer, not float.
+            elif item_name == "outstanding_shares" and "shares_outstanding" in all_fundamental_data:
+                raw_value = all_fundamental_data.get("shares_outstanding") # Assuming it's directly available
+                if raw_value is not None:
+                    try:
+                        line_item_values[item_name] = int(raw_value) # Cast to int
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert outstanding_shares '{raw_value}' to int. Setting to None.")
+                        line_item_values[item_name] = None
+                    continue # Skip float casting for this specific item
             else:
-                # Fallback or if item not in detailed fundamentals (e.g. mock or specific API call)
-                # logger.debug(f"Line item '{item_name}' not directly mapped from get_fundamentals summary for {ticker}. Using placeholder.")
-                line_item_values[item_name] = None # Or some other placeholder like 0.0, or random.uniform(1,100) if it was mocked
+                # If not directly mapped, check if item_name itself is a key in all_fundamental_data
+                raw_value = all_fundamental_data.get(item_name)
+                if raw_value is None:
+                    logger.debug(f"Line item '{item_name}' not found in fundamentals for {ticker} or not directly mapped. Will be None.")
+            
+            line_item_values[item_name] = safe_float(raw_value)
 
         try:
-            # Dynamically create LineItem. This assumes LineItem can handle extra fields.
-            # Or, only pass known fields to LineItem constructor.
-            # For safety, only pass fields explicitly defined in LineItem model + 'date' and 'period'
-            # This requires knowing LineItem's model definition.
-            # Assuming LineItem is a Pydantic model that can take extra fields or specific ones.
-            
-            # Let's assume LineItem constructor takes **kwargs or has all these as fields
-            item = LineItem(**line_item_values) 
+            item = LineItem(**line_item_values)
             results.append(item)
         except Exception as e:
             logger.error(f"Error creating LineItem for {ticker} with values {line_item_values}: {e}")
@@ -684,6 +869,4 @@ def search_line_items(ticker: str, line_items: list[str], end_date: str, period:
         logger.warning(f"search_line_items for {ticker} with items {line_items} returned no results.")
     else:
         logger.info(f"search_line_items for {ticker} (items: {line_items}) returned {len(results)} results.")
-        # logger.debug(f"First result for {ticker} line items: {results[0].model_dump_json() if results else 'N/A'}")
-
     return results 

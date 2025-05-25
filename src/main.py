@@ -7,6 +7,7 @@ from colorama import Fore, Style, init
 import questionary
 from src.agents.portfolio_manager import portfolio_management_agent
 from src.agents.risk_manager import risk_management_agent
+from src.agents.composite_rank import composite_rank_agent
 from src.graph.state import AgentState
 from src.utils.display import print_trading_output
 from src.utils.analysts import ANALYST_ORDER, get_analyst_nodes
@@ -19,9 +20,21 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from src.utils.visualize import save_graph_as_png
 import json
+import os
 
-# Load environment variables from .env file
+# Load environment variables from .env file at the start
+# This ensures they're available before any modules that need them are imported
 load_dotenv()
+
+# Logging some environment info to help with debugging
+def print_env_info():
+    data_source = os.environ.get("AI_HEDGE_FUND_DATA_SOURCE", "financial_datasets")
+    zerodha_api_key = os.environ.get("ZERODHA_API_KEY")
+    zerodha_token = os.environ.get("ZERODHA_ACCESS_TOKEN")
+    
+    print(f"Data source: {data_source}")
+    print(f"Zerodha API key: {'Set' if zerodha_api_key else 'Not set'}")
+    print(f"Zerodha access token: {'Set' if zerodha_token else 'Not set'}")
 
 init(autoreset=True)
 
@@ -85,9 +98,35 @@ def run_hedge_fund(
             },
         )
 
+        # Extract portfolio decisions from the portfolio_manager_agent's message
+        portfolio_manager_message_content = None
+        for message in reversed(final_state.get("messages", [])):  # Search backwards
+            if hasattr(message, 'name') and message.name == "portfolio_manager":
+                portfolio_manager_message_content = message.content
+                break
+        
+        decisions = {}
+        if portfolio_manager_message_content:
+            parsed_decisions = parse_hedge_fund_response(portfolio_manager_message_content)
+            if isinstance(parsed_decisions, dict):
+                decisions = parsed_decisions
+            else:
+                print(f"{Fore.RED}Portfolio manager response was not a valid dictionary.{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.RED}Could not find portfolio manager decisions in the final state.{Style.RESET_ALL}")
+
+        # Extract composite rank data from state data (populated by composite_rank_agent)
+        composite_rank_data = final_state.get("data", {}).get("composite_rank", {})
+        
+        # Add composite_rank_data to the decisions dictionary under a specific key.
+        # print_trading_output expects this structure to correctly process and display composite rank info.
+        if composite_rank_data: # Ensure composite_rank_data is not empty
+            decisions["composite_rank"] = composite_rank_data
+
         return {
-            "decisions": parse_hedge_fund_response(final_state["messages"][-1].content),
-            "analyst_signals": final_state["data"]["analyst_signals"],
+            "decisions": decisions, # Contains portfolio manager decisions + composite_rank_data
+            "analyst_signals": final_state.get("data", {}).get("analyst_signals", {}),
+            "state": final_state  # Pass the whole state for show_reasoning in display.py
         }
     finally:
         # Stop progress tracking
@@ -119,6 +158,8 @@ def create_workflow(selected_analysts=None):
     # Always add risk and portfolio management
     workflow.add_node("risk_management_agent", risk_management_agent)
     workflow.add_node("portfolio_manager", portfolio_management_agent)
+    # Add composite rank aggregator
+    workflow.add_node("composite_rank", composite_rank_agent)
 
     # Connect selected analysts to risk management
     for analyst_key in selected_analysts:
@@ -126,7 +167,8 @@ def create_workflow(selected_analysts=None):
         workflow.add_edge(node_name, "risk_management_agent")
 
     workflow.add_edge("risk_management_agent", "portfolio_manager")
-    workflow.add_edge("portfolio_manager", END)
+    workflow.add_edge("portfolio_manager", "composite_rank")
+    workflow.add_edge("composite_rank", END)
 
     workflow.set_entry_point("start_node")
     return workflow
@@ -146,8 +188,13 @@ if __name__ == "__main__":
     parser.add_argument("--show-reasoning", action="store_true", help="Show reasoning from each agent")
     parser.add_argument("--show-agent-graph", action="store_true", help="Show the agent graph")
     parser.add_argument("--ollama", action="store_true", help="Use Ollama for local LLM inference")
+    parser.add_argument("--debug-env", action="store_true", help="Print environment information for debugging")
 
     args = parser.parse_args()
+    
+    # Debug environment if requested or we're using a data source that needs API keys
+    if args.debug_env or os.environ.get("AI_HEDGE_FUND_DATA_SOURCE") == "zerodha":
+        print_env_info()
 
     # Parse tickers from comma-separated string
     tickers = [ticker.strip() for ticker in args.tickers.split(",")]
