@@ -28,6 +28,10 @@ def print_trading_output(result: dict) -> None:
 
     # Print decisions for each ticker
     for ticker, decision in decisions.items():
+        # Skip composite_rank as it's not a real ticker
+        if ticker == "composite_rank":
+            continue
+            
         print(f"\n{Fore.WHITE}{Style.BRIGHT}Analysis for {Fore.CYAN}{ticker}{Style.RESET_ALL}")
         print(f"{Fore.WHITE}{Style.BRIGHT}{'=' * 50}{Style.RESET_ALL}")
 
@@ -99,14 +103,17 @@ def print_trading_output(result: dict) -> None:
         table_data = sort_agent_signals(table_data)
 
         print(f"\n{Fore.WHITE}{Style.BRIGHT}AGENT ANALYSIS:{Style.RESET_ALL} [{Fore.CYAN}{ticker}{Style.RESET_ALL}]")
-        print(
-            tabulate(
-                table_data,
-                headers=[f"{Fore.WHITE}Agent", "Signal", "Confidence", "Reasoning"],
-                tablefmt="grid",
-                colalign=("left", "center", "right", "left"),
+        if table_data:
+            print(
+                tabulate(
+                    table_data,
+                    headers=[f"{Fore.WHITE}Agent", "Signal", "Confidence", "Reasoning"],
+                    tablefmt="grid",
+                    colalign=("left", "center", "right", "left"),
+                )
             )
-        )
+        else:
+            print(f"{Fore.YELLOW}No agent analysis available for {ticker}{Style.RESET_ALL}")
 
         # Print Trading Decision Table
         action = decision.get("action", "").upper()
@@ -171,12 +178,16 @@ def print_trading_output(result: dict) -> None:
             "COVER": Fore.GREEN,
             "SHORT": Fore.RED,
         }.get(action, Fore.WHITE)
+        # Skip composite_rank as it's not a real ticker
+        if ticker == "composite_rank":
+            continue
+            
         portfolio_data.append(
             [
                 f"{Fore.CYAN}{ticker}{Style.RESET_ALL}",
                 f"{action_color}{action}{Style.RESET_ALL}",
                 f"{action_color}{decision.get('quantity')}{Style.RESET_ALL}",
-                f"{Fore.WHITE}{decision.get('confidence'):.1f}%{Style.RESET_ALL}",
+                f"{Fore.WHITE}{decision.get('confidence', 0):.1f}%{Style.RESET_ALL}",
             ]
         )
 
