@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Zerodha Integration Guide
+
+The AI Hedge Fund supports Indian stocks through integration with Zerodha, India's largest discount broker.
+
+## Key Components
+
+### API Integration
+- [src/tools/zerodha_api.py](mdc:src/tools/zerodha_api.py) - Main Zerodha API integration
+- [generate_zerodha_token.py](mdc:generate_zerodha_token.py) - Script to generate access tokens
+- [run_with_zerodha.sh](mdc:run_with_zerodha.sh) - Helper script for running with Zerodha
+
+### Data Source
+- [src/tools/data_source.py](mdc:src/tools/data_source.py) - Unified interface for data sources
+  - Detects whether to use Financial Datasets API or Zerodha based on environment variables
+
+## Configuration
+
+Environment variables required for Zerodha:
+```
+ZERODHA_API_KEY=your-zerodha-api-key
+ZERODHA_API_SECRET=your-zerodha-api-secret
+ZERODHA_ACCESS_TOKEN=your-zerodha-access-token
+AI_HEDGE_FUND_DATA_SOURCE="zerodha"
+```
+
+## Workflow
+
+1. Generate access token using `generate_zerodha_token.py`
+2. Set environment variables (can be stored in `.env` file)
+3. Run the hedge fund with Indian stock tickers
+
+## Indian Stock Market Specifics
+
+- The integration supports NSE (National Stock Exchange) stock symbols
+- Fundamental data is scraped from Screener.in
+- Technical data comes from the Kite Connect API

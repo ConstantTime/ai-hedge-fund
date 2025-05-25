@@ -1,0 +1,45 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# AI Hedge Fund Agents Guide
+
+The AI Hedge Fund consists of multiple agents working together to analyze stocks and make trading decisions.
+
+## Agent Types
+
+### Investor Profile Agents
+These agents analyze stocks based on the investment strategies of famous investors:
+
+- [src/agents/warren_buffett.py](mdc:src/agents/warren_buffett.py) - Value investing, focusing on strong fundamentals
+- [src/agents/aswath_damodaran.py](mdc:src/agents/aswath_damodaran.py) - Valuation expert
+- [src/agents/ben_graham.py](mdc:src/agents/ben_graham.py) - Defensive value investing
+- [src/agents/bill_ackman.py](mdc:src/agents/bill_ackman.py) - Activist investing
+- [src/agents/cathie_wood.py](mdc:src/agents/cathie_wood.py) - Disruptive innovation investing
+- [src/agents/charlie_munger.py](mdc:src/agents/charlie_munger.py) - Concentrated value investing
+- [src/agents/michael_burry.py](mdc:src/agents/michael_burry.py) - Contrarian investing
+- [src/agents/peter_lynch.py](mdc:src/agents/peter_lynch.py) - Growth at reasonable price
+- [src/agents/phil_fisher.py](mdc:src/agents/phil_fisher.py) - Growth investing
+- [src/agents/stanley_druckenmiller.py](mdc:src/agents/stanley_druckenmiller.py) - Macro investing
+
+### Analysis Agents
+These agents provide specialized analysis:
+
+- [src/agents/fundamentals.py](mdc:src/agents/fundamentals.py) - Analyzes fundamental data
+- [src/agents/technicals.py](mdc:src/agents/technicals.py) - Analyzes technical indicators
+- [src/agents/sentiment.py](mdc:src/agents/sentiment.py) - Analyzes market sentiment
+- [src/agents/valuation.py](mdc:src/agents/valuation.py) - Calculates intrinsic value
+
+### Management Agents
+These agents make decisions and manage the portfolio:
+
+- [src/agents/risk_manager.py](mdc:src/agents/risk_manager.py) - Manages risk and position sizing
+- [src/agents/portfolio_manager.py](mdc:src/agents/portfolio_manager.py) - Makes final trading decisions
+- [src/agents/composite_rank.py](mdc:src/agents/composite_rank.py) - Aggregates signals from all agents
+
+## Agent Workflow
+
+1. Investor and analysis agents generate signals for each stock
+2. Risk manager determines position limits
+3. Portfolio manager combines signals and risk analysis to make trading decisions
