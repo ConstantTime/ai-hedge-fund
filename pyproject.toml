@@ -43,6 +43,7 @@ loguru = "^0.7.3"
 anthropic = "^0.51.0"
 requests = "^2.32.3"
 nsepy = "^0.8"
+apscheduler = "^3.10.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
