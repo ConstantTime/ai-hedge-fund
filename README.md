@@ -42,6 +42,8 @@ This project is for **educational and research purposes only**.
 By using this software, you agree to use it solely for learning purposes.
 
 ## Table of Contents
+- [🚀 New: Real-time Portfolio Monitoring](#-new-real-time-portfolio-monitoring)
+- [Indian Stock Market Integration](#indian-stock-market-integration)
 - [Setup](#setup)
   - [Using Poetry](#using-poetry)
   - [Using Docker](#using-docker)
@@ -55,6 +57,34 @@ By using this software, you agree to use it solely for learning purposes.
 ## Introduction
 
 The AI Hedge Fund is a combination of multiple AI agents that analyze market data and collaborate to make investment decisions. Each AI agent is designed to mimic the trading style and strategies of a famous investor (like Warren Buffett, Michael Burry), or a specific trading approach (like technical analysis).
+
+## 🚀 New: Real-time Portfolio Monitoring
+
+This project now includes a **live portfolio monitoring system** that tracks your actual Zerodha account in real-time! Monitor your cash, positions, P&L, and get AI-powered insights on your portfolio.
+
+### Quick Start - Portfolio Monitor
+
+```bash
+# 1. Set up Zerodha credentials
+python generate_zerodha_token.py
+
+# 2. Test the system
+python test_portfolio_monitor.py
+
+# 3. Start the web interface
+./start_portfolio_monitor.sh
+```
+
+Then open http://localhost:5173 to see your live portfolio dashboard!
+
+**Features:**
+- 📊 **Real-time Portfolio Tracking**: Live cash, positions, and P&L updates
+- 🌐 **Modern Web Interface**: Beautiful dashboard with live data streaming
+- 📈 **Portfolio Analytics**: Risk metrics, concentration analysis, and performance tracking
+- 🔄 **Auto-refresh**: Portfolio data updates every 30 seconds automatically
+- 📱 **Responsive Design**: Works on desktop and mobile
+
+For detailed setup instructions, see [PORTFOLIO_MONITOR.md](PORTFOLIO_MONITOR.md).
 
 ## Indian Stock Market Integration
 
