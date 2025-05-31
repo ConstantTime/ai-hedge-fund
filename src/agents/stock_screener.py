@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 from loguru import logger
 from kiteconnect import KiteConnect
+import random
 
 # Import data source functions directly
 from src.tools import data_source
@@ -103,20 +104,33 @@ class AIStockScreener:
         self.data_source = data_source
         self.zerodha_api = ZerodhaAdapter()
         
-        # Screening criteria
+        # Enhanced screening criteria
         self.market_cap_range = (500, 50000)  # 500Cr to 50,000Cr (mid/small cap)
         self.min_volume = 100000  # Minimum daily volume
         self.sectors_to_focus = [
             "Technology", "Healthcare", "Consumer Goods", "Financial Services",
-            "Industrial", "Energy", "Materials", "Real Estate"
+            "Industrial", "Energy", "Materials", "Real Estate", "Pharmaceuticals",
+            "Automotive", "Chemicals", "Textiles", "Media", "Telecommunications"
         ]
         
-        logger.info("AIStockScreener initialized")
+        # Sector-based stock mapping (for better selection)
+        self.sector_stocks = {
+            "Technology": ["TCS", "INFY", "WIPRO", "TECHM", "HCLTECH", "LTI", "MPHASIS", "MINDTREE"],
+            "Healthcare": ["SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "LUPIN", "AUROBINDO", "BIOCON"],
+            "Financial": ["HDFCBANK", "ICICIBANK", "BAJFINANCE", "KOTAKBANK", "SBIN", "AXISBANK"],
+            "Automotive": ["TATAMOTORS", "MARUTI", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "TVSMOTORS"],
+            "Consumer": ["PIDILITIND", "DABUR", "GODREJCP", "BRITANNIA", "NESTLEIND", "HUL"],
+            "Industrial": ["RELIANCE", "LT", "SIEMENS", "ABB", "BHEL", "CUMMINSIND"],
+            "Materials": ["JSWSTEEL", "TATASTEEL", "HINDALCO", "VEDL", "JINDALSTEL", "SAIL"],
+            "Energy": ["ONGC", "IOC", "BPCL", "GAIL", "NTPC", "POWERGRID"]
+        }
+        
+        logger.info("AIStockScreener initialized with intelligent filtering")
     
     def get_nse_universe(self) -> List[Dict]:
-        """Get NSE stock universe for screening"""
+        """Get NSE stock universe for screening with intelligent pre-filtering"""
         try:
-            logger.info("🔍 SCREENING: Starting NSE universe discovery...")
+            logger.info("🔍 SCREENING: Starting intelligent NSE universe discovery...")
             
             # Get all NSE instruments from Zerodha
             if hasattr(self.zerodha_api, 'kite') and self.zerodha_api.kite:
@@ -127,39 +141,282 @@ class AIStockScreener:
                 equity_stocks = [
                     inst for inst in instruments 
                     if inst['instrument_type'] == 'EQ' and 
-                    inst['segment'] == 'NSE'
+                    inst['segment'] == 'NSE' and
+                    self._is_stock_tradeable(inst)
                 ]
                 
-                logger.info(f"🔍 SCREENING: Found {len(equity_stocks)} NSE equity stocks")
-                logger.info(f"🔍 SCREENING: First 5 stocks: {[s['tradingsymbol'] for s in equity_stocks[:5]]}")
-                return equity_stocks
+                logger.info(f"🔍 SCREENING: Found {len(equity_stocks)} tradeable NSE equity stocks")
+                
+                # Apply intelligent filtering
+                filtered_stocks = self._apply_intelligent_filtering(equity_stocks)
+                logger.info(f"🧠 AI_FILTER: Reduced universe to {len(filtered_stocks)} high-potential stocks")
+                
+                return filtered_stocks
             else:
                 logger.warning("🔍 SCREENING: Zerodha API not available, using fallback stock list")
-                return self._get_fallback_stock_list()
+                return self._get_enhanced_fallback_stock_list()
                 
         except Exception as e:
             logger.error(f"🔍 SCREENING: Failed to fetch NSE universe: {e}")
-            return self._get_fallback_stock_list()
+            return self._get_enhanced_fallback_stock_list()
     
-    def _get_fallback_stock_list(self) -> List[Dict]:
-        """Fallback list of popular NSE mid/small cap stocks"""
-        return [
-            {"tradingsymbol": "TATAMOTORS", "name": "Tata Motors Ltd"},
-            {"tradingsymbol": "BAJFINANCE", "name": "Bajaj Finance Ltd"},
-            {"tradingsymbol": "HDFCBANK", "name": "HDFC Bank Ltd"},
-            {"tradingsymbol": "INFY", "name": "Infosys Ltd"},
-            {"tradingsymbol": "TCS", "name": "Tata Consultancy Services"},
-            {"tradingsymbol": "WIPRO", "name": "Wipro Ltd"},
-            {"tradingsymbol": "TECHM", "name": "Tech Mahindra Ltd"},
-            {"tradingsymbol": "MARUTI", "name": "Maruti Suzuki India Ltd"},
-            {"tradingsymbol": "SUNPHARMA", "name": "Sun Pharmaceutical Industries"},
-            {"tradingsymbol": "DRREDDY", "name": "Dr Reddy's Laboratories"},
-            {"tradingsymbol": "CIPLA", "name": "Cipla Ltd"},
-            {"tradingsymbol": "DIVISLAB", "name": "Divi's Laboratories Ltd"},
-            {"tradingsymbol": "PIDILITIND", "name": "Pidilite Industries Ltd"},
-            {"tradingsymbol": "DABUR", "name": "Dabur India Ltd"},
-            {"tradingsymbol": "GODREJCP", "name": "Godrej Consumer Products"},
-        ]
+    def _is_stock_tradeable(self, instrument: Dict) -> bool:
+        """Check if stock is tradeable (basic filters)"""
+        try:
+            symbol = instrument.get('tradingsymbol', '')
+            
+            # Skip if symbol contains patterns that indicate non-standard stocks
+            skip_patterns = ['-BE', '-SM', '-BZ', '-IL', '-BL', 'PP-', 'M-']
+            if any(pattern in symbol for pattern in skip_patterns):
+                return False
+            
+            # Skip very short symbols (likely indices or special instruments)
+            if len(symbol) < 3:
+                return False
+                
+            # Skip symbols with numbers (often warrants, rights, etc.)
+            if any(char.isdigit() for char in symbol):
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.debug(f"⚠️ TRADEABLE_CHECK: Error checking {instrument}: {e}")
+            return False
+    
+    def _apply_intelligent_filtering(self, stocks: List[Dict]) -> List[Dict]:
+        """Apply AI-powered intelligent filtering to select best candidates"""
+        logger.info("🧠 AI_FILTER: Starting intelligent stock filtering...")
+        
+        # Step 1: Sector-based diversified selection
+        sector_selected = self._select_by_sector_diversity(stocks)
+        logger.info(f"🎯 SECTOR_FILTER: Selected {len(sector_selected)} stocks across sectors")
+        
+        # Step 2: Market cap and volume filtering (when data available)
+        cap_filtered = self._filter_by_market_metrics(sector_selected)
+        logger.info(f"💰 CAP_FILTER: {len(cap_filtered)} stocks passed market cap/volume filters")
+        
+        # Step 3: Technical strength pre-filtering
+        technically_strong = self._prefilter_technical_strength(cap_filtered)
+        logger.info(f"📈 TECH_FILTER: {len(technically_strong)} stocks show technical strength")
+        
+        # Step 4: Smart sampling for final selection
+        final_selection = self._smart_sample_stocks(technically_strong, max_stocks=50)
+        logger.info(f"🎲 SMART_SAMPLE: Final selection of {len(final_selection)} stocks")
+        
+        return final_selection
+    
+    def _select_by_sector_diversity(self, stocks: List[Dict]) -> List[Dict]:
+        """Select stocks ensuring sector diversity"""
+        selected = []
+        stocks_by_sector = {}
+        
+        # Group stocks by known sectors
+        for stock in stocks:
+            symbol = stock.get('tradingsymbol', '')
+            sector = self._determine_stock_sector(symbol)
+            
+            if sector not in stocks_by_sector:
+                stocks_by_sector[sector] = []
+            stocks_by_sector[sector].append(stock)
+        
+        # Select balanced number from each sector
+        stocks_per_sector = max(10, 200 // len(stocks_by_sector))  # Aim for ~200 total
+        
+        for sector, sector_stocks in stocks_by_sector.items():
+            # Shuffle to avoid alphabetical bias
+            shuffled = sector_stocks.copy()
+            random.shuffle(shuffled)
+            
+            # Take top stocks from each sector
+            sector_selection = shuffled[:stocks_per_sector]
+            selected.extend(sector_selection)
+            
+            logger.debug(f"🎯 SECTOR: {sector} contributed {len(sector_selection)} stocks")
+        
+        return selected
+    
+    def _determine_stock_sector(self, symbol: str) -> str:
+        """Determine sector for a stock symbol"""
+        # Check known sector mappings
+        for sector, stocks in self.sector_stocks.items():
+            if symbol in stocks:
+                return sector
+        
+        # Use simple heuristics for unknown stocks
+        if any(term in symbol for term in ['TECH', 'INFO', 'SOFT', 'COMP']):
+            return "Technology"
+        elif any(term in symbol for term in ['PHARMA', 'DRUG', 'MED', 'BIO']):
+            return "Healthcare"
+        elif any(term in symbol for term in ['BANK', 'FIN', 'NBFC']):
+            return "Financial"
+        elif any(term in symbol for term in ['AUTO', 'MOTOR', 'BAJAJ']):
+            return "Automotive"
+        elif any(term in symbol for term in ['STEEL', 'METAL', 'ALUMIN', 'COPPER']):
+            return "Materials"
+        elif any(term in symbol for term in ['OIL', 'GAS', 'PETRO', 'ENERGY']):
+            return "Energy"
+        else:
+            return "Others"
+    
+    def _filter_by_market_metrics(self, stocks: List[Dict]) -> List[Dict]:
+        """Filter stocks by market cap and volume (when data available)"""
+        filtered = []
+        
+        for stock in stocks:
+            symbol = stock.get('tradingsymbol', '')
+            
+            try:
+                # Try to get basic market data for filtering
+                fundamentals = self.zerodha_api.get_fundamentals(symbol)
+                
+                if fundamentals and 'error' not in fundamentals:
+                    market_cap = fundamentals.get('market_cap', 0)
+                    
+                    # Apply market cap filter
+                    if self.market_cap_range[0] <= market_cap <= self.market_cap_range[1]:
+                        filtered.append(stock)
+                        logger.debug(f"✅ CAP_PASS: {symbol} market cap ₹{market_cap}Cr in range")
+                    else:
+                        logger.debug(f"❌ CAP_FAIL: {symbol} market cap ₹{market_cap}Cr out of range")
+                else:
+                    # If no fundamental data, include in filtered list for later screening
+                    # This ensures we don't lose potentially good stocks due to data unavailability
+                    filtered.append(stock)
+                    logger.debug(f"⚠️ CAP_UNKNOWN: {symbol} included despite missing cap data")
+                    
+            except Exception as e:
+                # Include stock if we can't check (to avoid losing good opportunities)
+                filtered.append(stock)
+                logger.debug(f"⚠️ CAP_ERROR: {symbol} included despite error: {e}")
+        
+        return filtered
+    
+    def _prefilter_technical_strength(self, stocks: List[Dict]) -> List[Dict]:
+        """Pre-filter stocks based on technical strength indicators"""
+        technically_strong = []
+        
+        # Sample a subset for technical analysis (to avoid API rate limits)
+        sample_size = min(len(stocks), 100)
+        sampled_stocks = random.sample(stocks, sample_size)
+        
+        logger.info(f"📊 TECH_PREFILTER: Analyzing {sample_size} stocks for technical strength")
+        
+        for stock in sampled_stocks:
+            symbol = stock.get('tradingsymbol', '')
+            
+            try:
+                # Get basic price data for quick technical check
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=30)  # Just 30 days for quick check
+                
+                price_data = data_source.get_price_data(
+                    symbol, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+                )
+                
+                if not price_data.empty and len(price_data) >= 10:
+                    # Quick technical strength check
+                    recent_high = price_data['high'].tail(10).max()
+                    recent_low = price_data['low'].tail(10).min()
+                    current_price = price_data['close'].iloc[-1]
+                    
+                    # Price position in recent range (higher is better)
+                    price_position = (current_price - recent_low) / (recent_high - recent_low) if recent_high > recent_low else 0.5
+                    
+                    # Volume trend (if available)
+                    volume_strength = 1.0  # Default
+                    if 'volume' in price_data.columns and len(price_data) >= 5:
+                        recent_avg_volume = price_data['volume'].tail(5).mean()
+                        older_avg_volume = price_data['volume'].head(5).mean() if len(price_data) >= 10 else recent_avg_volume
+                        volume_strength = recent_avg_volume / older_avg_volume if older_avg_volume > 0 else 1.0
+                    
+                    # Simple technical score
+                    tech_score = (price_position * 0.6) + (min(volume_strength, 2.0) / 2.0 * 0.4)
+                    
+                    # Include if technically promising
+                    if tech_score >= 0.4:  # 40% threshold
+                        technically_strong.append(stock)
+                        logger.debug(f"💪 TECH_STRONG: {symbol} score {tech_score:.2f}")
+                    else:
+                        logger.debug(f"💤 TECH_WEAK: {symbol} score {tech_score:.2f}")
+                else:
+                    # Include if no technical data (don't lose opportunities)
+                    technically_strong.append(stock)
+                    logger.debug(f"⚠️ TECH_UNKNOWN: {symbol} included despite missing price data")
+                    
+            except Exception as e:
+                # Include stock if technical analysis fails
+                technically_strong.append(stock)
+                logger.debug(f"⚠️ TECH_ERROR: {symbol} included despite error: {e}")
+        
+        # If we don't have enough technically strong stocks, add more from original list
+        if len(technically_strong) < 30:
+            remaining_stocks = [s for s in stocks if s not in sampled_stocks]
+            additional_needed = min(30 - len(technically_strong), len(remaining_stocks))
+            technically_strong.extend(random.sample(remaining_stocks, additional_needed))
+            logger.info(f"📊 TECH_BACKFILL: Added {additional_needed} additional stocks")
+        
+        return technically_strong
+    
+    def _smart_sample_stocks(self, stocks: List[Dict], max_stocks: int = 50) -> List[Dict]:
+        """Smart sampling to get final stock selection"""
+        if len(stocks) <= max_stocks:
+            return stocks
+        
+        # Ensure sector diversity in final selection
+        stocks_by_sector = {}
+        for stock in stocks:
+            symbol = stock.get('tradingsymbol', '')
+            sector = self._determine_stock_sector(symbol)
+            
+            if sector not in stocks_by_sector:
+                stocks_by_sector[sector] = []
+            stocks_by_sector[sector].append(stock)
+        
+        # Smart allocation across sectors
+        final_selection = []
+        stocks_per_sector = max_stocks // len(stocks_by_sector)
+        remaining_slots = max_stocks % len(stocks_by_sector)
+        
+        for sector, sector_stocks in stocks_by_sector.items():
+            allocation = stocks_per_sector
+            if remaining_slots > 0:
+                allocation += 1
+                remaining_slots -= 1
+            
+            # Shuffle for randomness within sector
+            shuffled = sector_stocks.copy()
+            random.shuffle(shuffled)
+            
+            selected_from_sector = shuffled[:min(allocation, len(shuffled))]
+            final_selection.extend(selected_from_sector)
+            
+            logger.debug(f"🎲 FINAL_SAMPLE: {sector} -> {len(selected_from_sector)} stocks")
+        
+        # If we still need more stocks, add randomly
+        if len(final_selection) < max_stocks:
+            remaining = [s for s in stocks if s not in final_selection]
+            additional = min(max_stocks - len(final_selection), len(remaining))
+            final_selection.extend(random.sample(remaining, additional))
+            logger.debug(f"🎲 FINAL_RANDOM: Added {additional} random stocks")
+        
+        return final_selection[:max_stocks]
+    
+    def _get_enhanced_fallback_stock_list(self) -> List[Dict]:
+        """Enhanced fallback list with sector diversity"""
+        fallback_stocks = []
+        
+        # Add stocks from each sector for diversity
+        for sector, stocks in self.sector_stocks.items():
+            for symbol in stocks[:3]:  # Top 3 from each sector
+                fallback_stocks.append({
+                    "tradingsymbol": symbol, 
+                    "name": f"{symbol} Ltd",
+                    "sector": sector
+                })
+        
+        logger.info(f"📋 FALLBACK: Using enhanced fallback list with {len(fallback_stocks)} diversified stocks")
+        return fallback_stocks
     
     def calculate_technical_indicators(self, ticker: str, price_data: pd.DataFrame) -> Dict:
         """Calculate technical indicators for a stock"""
@@ -576,16 +833,27 @@ class AIStockScreener:
             return None
     
     async def scan_opportunities(self, max_stocks: int = 50) -> List[StockOpportunity]:
-        """Scan NSE stocks for opportunities"""
-        logger.info(f"🚀 SCREENING: Starting AI stock screening for top {max_stocks} opportunities")
+        """Scan NSE stocks for opportunities with intelligent AI-powered filtering"""
+        logger.info(f"🚀 SCREENING: Starting AI-powered stock screening for {max_stocks} opportunities")
         
-        # Get stock universe
+        # Get intelligently filtered stock universe
         stock_universe = self.get_nse_universe()
-        logger.info(f"🚀 SCREENING: Total universe size: {len(stock_universe)} stocks")
+        logger.info(f"🚀 SCREENING: AI-filtered universe size: {len(stock_universe)} stocks")
         
-        # Limit to max_stocks for performance
-        stocks_to_screen = stock_universe[:max_stocks]
-        logger.info(f"🚀 SCREENING: Screening {len(stocks_to_screen)} stocks")
+        # The intelligent filtering already limits stocks, but we can still cap it
+        stocks_to_screen = stock_universe[:max_stocks] if len(stock_universe) > max_stocks else stock_universe
+        logger.info(f"🚀 SCREENING: Final screening list: {len(stocks_to_screen)} stocks")
+        
+        # Log sector distribution of selected stocks
+        sector_counts = {}
+        for stock in stocks_to_screen:
+            symbol = stock.get('tradingsymbol', '')
+            sector = self._determine_stock_sector(symbol)
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        
+        logger.info("🎯 SECTOR_DISTRIBUTION:")
+        for sector, count in sorted(sector_counts.items(), key=lambda x: x[1], reverse=True):
+            logger.info(f"  {sector}: {count} stocks")
         
         opportunities = []
         
@@ -601,25 +869,47 @@ class AIStockScreener:
                 )
         
         # Execute screening
-        logger.info(f"🚀 SCREENING: Starting parallel screening of {len(stocks_to_screen)} stocks...")
+        logger.info(f"🚀 SCREENING: Starting parallel screening of {len(stocks_to_screen)} AI-selected stocks...")
         tasks = [screen_with_semaphore(stock) for stock in stocks_to_screen]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Filter successful results
+        # Filter successful results and analyze quality
         successful_screens = 0
         failed_screens = 0
+        high_quality_stocks = 0
+        sector_performance = {}
         
         for i, result in enumerate(results):
             if isinstance(result, StockOpportunity):
                 opportunities.append(result)
                 successful_screens += 1
+                
+                # Track sector performance
+                sector = result.sector
+                if sector not in sector_performance:
+                    sector_performance[sector] = {'count': 0, 'avg_score': 0, 'total_score': 0}
+                
+                sector_performance[sector]['count'] += 1
+                sector_performance[sector]['total_score'] += result.overall_score
+                sector_performance[sector]['avg_score'] = sector_performance[sector]['total_score'] / sector_performance[sector]['count']
+                
                 if result.overall_score >= 70:
-                    logger.info(f"🎯 HIGH_SCORE: {result.ticker} scored {result.overall_score:.1f} - {result.signal.value}")
+                    high_quality_stocks += 1
+                    logger.info(f"🎯 HIGH_SCORE: {result.ticker} ({result.sector}) scored {result.overall_score:.1f} - {result.signal.value}")
             else:
                 failed_screens += 1
-                logger.debug(f"❌ FAILED: Stock {stocks_to_screen[i].get('tradingsymbol', 'UNKNOWN')} failed screening")
+                stock_symbol = stocks_to_screen[i].get('tradingsymbol', 'UNKNOWN')
+                logger.debug(f"❌ FAILED: Stock {stock_symbol} failed screening")
         
         logger.info(f"🚀 SCREENING: Completed - {successful_screens} successful, {failed_screens} failed")
+        logger.info(f"🏆 QUALITY: {high_quality_stocks}/{successful_screens} stocks scored ≥70 ({high_quality_stocks/successful_screens*100:.1f}% hit rate)")
+        
+        # Log sector performance analysis
+        if sector_performance:
+            logger.info("📊 SECTOR_PERFORMANCE:")
+            sorted_sectors = sorted(sector_performance.items(), key=lambda x: x[1]['avg_score'], reverse=True)
+            for sector, perf in sorted_sectors[:5]:  # Top 5 performing sectors
+                logger.info(f"  {sector}: {perf['count']} stocks, avg score {perf['avg_score']:.1f}")
         
         # Sort by overall score (best opportunities first)
         opportunities.sort(key=lambda x: x.overall_score, reverse=True)
@@ -629,9 +919,9 @@ class AIStockScreener:
             top_5 = opportunities[:5]
             logger.info("🏆 TOP_5_OPPORTUNITIES:")
             for i, opp in enumerate(top_5, 1):
-                logger.info(f"  {i}. {opp.ticker}: {opp.overall_score:.1f} ({opp.signal.value}) - {opp.company_name}")
+                logger.info(f"  {i}. {opp.ticker} ({opp.sector}): {opp.overall_score:.1f} ({opp.signal.value}) - ₹{opp.current_price}")
         
-        logger.info(f"🚀 SCREENING: Found {len(opportunities)} stock opportunities")
+        logger.info(f"🚀 SCREENING: Found {len(opportunities)} stock opportunities using AI-powered filtering")
         return opportunities
     
     def get_top_opportunities(self, opportunities: List[StockOpportunity], 
