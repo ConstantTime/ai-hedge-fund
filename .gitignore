@@ -53,4 +53,7 @@ Thumbs.db
 node_modules
 
 # Cache files
+cache/backend.log
+*.log
 cache/
+app/backend/cache/
