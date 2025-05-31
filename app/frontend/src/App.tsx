@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { Flow } from './components/Flow';
+import { Opportunities } from './components/Opportunities';
+import { Portfolio } from './components/Portfolio';
 
 interface ApiResponse {
   data: any;
@@ -51,26 +54,7 @@ export default function App() {
     },
     content: {
       flex: 1,
-      padding: '20px',
       overflow: 'auto'
-    },
-    responseBox: {
-      marginTop: '20px',
-      padding: '15px',
-      backgroundColor: '#f8f9fa',
-      borderRadius: '8px',
-      border: '1px solid #dee2e6',
-      maxHeight: '400px',
-      overflow: 'auto'
-    },
-    button: {
-      padding: '8px 16px',
-      border: 'none',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      fontSize: '14px',
-      fontWeight: '500',
-      transition: 'all 0.2s'
     }
   };
 
@@ -119,7 +103,7 @@ export default function App() {
   const renderApiResponse = () => {
     if (loading) {
       return (
-        <div style={tabStyles.responseBox}>
+        <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6', maxHeight: '400px', overflow: 'auto' }}>
           <h4 style={{ margin: '0 0 10px 0', color: '#007bff' }}>⏳ Loading...</h4>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
@@ -138,7 +122,7 @@ export default function App() {
 
     if (error) {
       return (
-        <div style={{...tabStyles.responseBox, backgroundColor: '#f8d7da', borderColor: '#f5c6cb'}}>
+        <div style={{ padding: '15px', backgroundColor: '#f8d7da', border: '1px solid #f5c6cb' }}>
           <h4 style={{ margin: '0 0 10px 0', color: '#721c24' }}>❌ Error</h4>
           <p style={{ margin: 0, color: '#721c24' }}>{error}</p>
         </div>
@@ -147,7 +131,7 @@ export default function App() {
 
     if (!apiResponse) {
       return (
-        <div style={tabStyles.responseBox}>
+        <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6', maxHeight: '400px', overflow: 'auto' }}>
           <h4 style={{ margin: '0 0 10px 0', color: '#6c757d' }}>💡 Click any button above to see API response</h4>
           <p style={{ margin: 0, color: '#6c757d' }}>Real-time data will appear here</p>
         </div>
@@ -155,7 +139,7 @@ export default function App() {
     }
 
     return (
-      <div style={tabStyles.responseBox}>
+      <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6', maxHeight: '400px', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <h4 style={{ margin: 0, color: '#28a745' }}>✅ API Response</h4>
           <small style={{ color: '#6c757d' }}>
@@ -182,165 +166,37 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'portfolio':
-        return (
-          <div>
-            <h2 style={{ marginBottom: '16px', color: '#28a745' }}>📊 Portfolio Monitor</h2>
-            <div style={{ 
-              padding: '20px', 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: '8px',
-              marginBottom: '16px'
-            }}>
-              <h3>Portfolio Summary</h3>
-              <p>Real-time portfolio data from your Zerodha account</p>
-              <div style={{ marginTop: '12px' }}>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: loading ? '#6c757d' : '#007bff',
-                    color: 'white'
-                  }}
-                  onClick={() => handleApiCall('/portfolio/summary')}
-                  disabled={loading}
-                >
-                  {loading ? 'Loading...' : 'Fetch Portfolio Data'}
-                </button>
-              </div>
-            </div>
-            {renderApiResponse()}
-          </div>
-        );
-      
+        return <Portfolio />;
       case 'opportunities':
-        return (
-          <div>
-            <h2 style={{ marginBottom: '16px', color: '#28a745' }}>🤖 AI Opportunities</h2>
-            <div style={{ 
-              padding: '20px', 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: '8px',
-              marginBottom: '16px'
-            }}>
-              <h3>Stock Screening</h3>
-              <p>AI-powered stock analysis and opportunities</p>
-              <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: loading ? '#6c757d' : '#28a745',
-                    color: 'white'
-                  }}
-                  onClick={() => handleApiCall('/opportunities/status')}
-                  disabled={loading}
-                >
-                  Check Status
-                </button>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: loading ? '#6c757d' : '#17a2b8',
-                    color: 'white'
-                  }}
-                  onClick={() => handleApiCall('/opportunities/scan?max_stocks=10')}
-                  disabled={loading}
-                >
-                  Start Quick Scan (10 stocks)
-                </button>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: loading ? '#6c757d' : '#6c757d',
-                    color: 'white'
-                  }}
-                  onClick={() => handleApiCall('/opportunities/scan?max_stocks=20')}
-                  disabled={loading}
-                >
-                  Start Full Scan (20 stocks)
-                </button>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: loading ? '#adb5bd' : '#ffc107',
-                    color: loading ? 'white' : 'black'
-                  }}
-                  onClick={() => handleApiCall('/opportunities/list?min_score=60&limit=10')}
-                  disabled={loading}
-                >
-                  List Top Opportunities
-                </button>
-              </div>
-            </div>
-            {renderApiResponse()}
-          </div>
-        );
-      
+        return <Opportunities />;
       case 'agents':
-        return (
-          <div>
-            <h2 style={{ marginBottom: '16px', color: '#6c757d' }}>🤖 AI Agents Flow</h2>
-            <div style={{ 
-              padding: '20px', 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: '8px',
-              marginBottom: '16px'
-            }}>
-              <h3>Agent Workflow</h3>
-              <p>Multi-agent system for stock analysis and trading decisions</p>
-              <div style={{ marginTop: '12px' }}>
-                <button 
-                  style={{
-                    ...tabStyles.button,
-                    backgroundColor: '#6c757d',
-                    color: 'white'
-                  }}
-                  onClick={() => console.log('Starting agent workflow...')}
-                >
-                  Start Workflow (Coming Soon)
-                </button>
-              </div>
-            </div>
-            <div style={tabStyles.responseBox}>
-              <h4 style={{ margin: '0 0 10px 0', color: '#6c757d' }}>🚧 Under Development</h4>
-              <p style={{ margin: 0, color: '#6c757d' }}>
-                AI agents workflow will be integrated here to show the complete decision-making process.
-              </p>
-            </div>
-          </div>
-        );
-      
+        return <Flow />;
       default:
-        return null;
+        return <Portfolio />;
     }
   };
 
   return (
-    <>
-      <style>
-        {`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}
-      </style>
-      <div style={tabStyles.container}>
-        <div style={tabStyles.header}>
-          <h1 style={{ margin: 0, fontSize: '24px' }}>🎉 AI Hedge Fund System</h1>
-          <p style={{ margin: '8px 0 0 0', color: '#6c757d' }}>
-            Real-time portfolio monitoring and AI-powered opportunities
-          </p>
-        </div>
-        
-        <div style={tabStyles.tabList}>
-          <TabButton value="portfolio">Portfolio Monitor</TabButton>
-          <TabButton value="opportunities">AI Opportunities</TabButton>
-          <TabButton value="agents">AI Agents Flow</TabButton>
-        </div>
-        
-        <div style={tabStyles.content}>
-          {renderContent()}
-        </div>
+    <div style={tabStyles.container}>
+      {/* Header */}
+      <div style={tabStyles.header}>
+        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>🤖 AI Hedge Fund System</h1>
+        <p style={{ margin: '5px 0 0 0', color: '#6c757d' }}>
+          Real-time portfolio monitoring and AI-powered opportunities
+        </p>
       </div>
-    </>
+
+      {/* Tab Navigation */}
+      <div style={tabStyles.tabList}>
+        <TabButton value="portfolio">Portfolio Monitor</TabButton>
+        <TabButton value="opportunities">AI Opportunities</TabButton>
+        <TabButton value="agents">AI Agents Flow</TabButton>
+      </div>
+
+      {/* Content Area */}
+      <div style={tabStyles.content}>
+        {renderContent()}
+      </div>
+    </div>
   );
 }

@@ -54,7 +54,7 @@ const Opportunities: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [filters, setFilters] = useState({
-    signal: '',
+    signal: 'all',
     minScore: 60,
     sector: '',
     limit: 10
@@ -332,6 +332,25 @@ const Opportunities: React.FC = () => {
     }
   };
 
+  const clearCache = async () => {
+    try {
+      console.log('Clearing opportunities cache...');
+      const response = await fetch('/opportunities/cache', {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        await fetchScanStatus();
+        await fetchOpportunities();
+        console.log('Cache cleared successfully');
+      } else {
+        setError('Failed to clear cache');
+      }
+    } catch (error) {
+      console.error('Failed to clear cache:', error);
+      setError('Failed to clear cache');
+    }
+  };
+
   // Main render with explicit styling
   return (
     <div className="w-full h-full overflow-auto" style={{ backgroundColor: 'white', color: 'black', minHeight: '100vh' }}>
@@ -372,26 +391,50 @@ const Opportunities: React.FC = () => {
                     {scanStatus.last_scan && (
                       <div>Last Scan: {new Date(scanStatus.last_scan).toLocaleString()}</div>
                     )}
+                    {scanStatus.cache_age_seconds !== null && (
+                      <div className="text-sm text-gray-500">
+                        Cache age: {Math.floor(scanStatus.cache_age_seconds / 60)}m {scanStatus.cache_age_seconds % 60}s
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>Loading status...</div>
                 )}
               </div>
-              <div className="space-x-2">
-                <Button 
-                  onClick={() => startScan(20)} 
-                  disabled={scanning || (scanStatus?.scan_in_progress ?? false)}
-                >
-                  {scanning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  Scan 20 Stocks
-                </Button>
-                <Button 
-                  onClick={() => startScan(50)} 
-                  disabled={scanning || (scanStatus?.scan_in_progress ?? false)}
-                  variant="outline"
-                >
-                  Scan 50 Stocks
-                </Button>
+              <div className="space-x-2 space-y-2">
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={() => startScan(20)} 
+                    disabled={scanning || (scanStatus?.scan_in_progress ?? false)}
+                  >
+                    {scanning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Scan 20 Stocks
+                  </Button>
+                  <Button 
+                    onClick={() => startScan(50)} 
+                    disabled={scanning || (scanStatus?.scan_in_progress ?? false)}
+                    variant="outline"
+                  >
+                    Scan 50 Stocks
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={clearCache}
+                    variant="secondary"
+                    size="sm"
+                    disabled={scanning || (scanStatus?.scan_in_progress ?? false)}
+                  >
+                    Clear Cache
+                  </Button>
+                  <Button 
+                    onClick={fetchOpportunities}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Refresh List
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -418,7 +461,7 @@ const Opportunities: React.FC = () => {
                         <SelectValue placeholder="All signals" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All Signals</SelectItem>
+                        <SelectItem value="all">All Signals</SelectItem>
                         <SelectItem value="STRONG_BUY">Strong Buy</SelectItem>
                         <SelectItem value="BUY">Buy</SelectItem>
                         <SelectItem value="HOLD">Hold</SelectItem>

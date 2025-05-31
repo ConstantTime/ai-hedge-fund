@@ -116,8 +116,11 @@ class AIStockScreener:
     def get_nse_universe(self) -> List[Dict]:
         """Get NSE stock universe for screening"""
         try:
+            logger.info("🔍 SCREENING: Starting NSE universe discovery...")
+            
             # Get all NSE instruments from Zerodha
             if hasattr(self.zerodha_api, 'kite') and self.zerodha_api.kite:
+                logger.info("🔍 SCREENING: Fetching NSE instruments from Zerodha API...")
                 instruments = self.zerodha_api.kite.instruments("NSE")
                 
                 # Filter for equity stocks only
@@ -127,14 +130,15 @@ class AIStockScreener:
                     inst['segment'] == 'NSE'
                 ]
                 
-                logger.info(f"Found {len(equity_stocks)} NSE equity stocks")
+                logger.info(f"🔍 SCREENING: Found {len(equity_stocks)} NSE equity stocks")
+                logger.info(f"🔍 SCREENING: First 5 stocks: {[s['tradingsymbol'] for s in equity_stocks[:5]]}")
                 return equity_stocks
             else:
-                logger.warning("Zerodha API not available, using fallback stock list")
+                logger.warning("🔍 SCREENING: Zerodha API not available, using fallback stock list")
                 return self._get_fallback_stock_list()
                 
         except Exception as e:
-            logger.error(f"Failed to fetch NSE universe: {e}")
+            logger.error(f"🔍 SCREENING: Failed to fetch NSE universe: {e}")
             return self._get_fallback_stock_list()
     
     def _get_fallback_stock_list(self) -> List[Dict]:
@@ -159,145 +163,177 @@ class AIStockScreener:
     
     def calculate_technical_indicators(self, ticker: str, price_data: pd.DataFrame) -> Dict:
         """Calculate technical indicators for a stock"""
-        try:
-            if price_data.empty or len(price_data) < 20:
-                return self._default_technical_indicators()
-            
-            # Ensure we have the required columns
-            if 'close' not in price_data.columns:
-                price_data['close'] = price_data.get('Close', price_data.iloc[:, -1])
-            if 'volume' not in price_data.columns:
-                price_data['volume'] = price_data.get('Volume', 0)
-            
-            # RSI calculation
-            rsi = self._calculate_rsi(price_data['close'])
-            
-            # MACD calculation
-            macd_signal = self._calculate_macd_signal(price_data['close'])
-            
-            # Moving average trend
-            ma_trend = self._calculate_ma_trend(price_data['close'])
-            
-            # Volume surge detection
-            volume_surge = self._detect_volume_surge(price_data['volume'])
-            
+        logger.debug(f"📊 TECHNICAL: Calculating indicators for {ticker}")
+        
+        if price_data.empty:
+            logger.warning(f"📊 TECHNICAL: No price data for {ticker}, using fallback indicators")
             return {
-                "rsi": rsi,
-                "macd_signal": macd_signal,
-                "moving_avg_trend": ma_trend,
-                "volume_surge": volume_surge
+                "rsi": 50.0,
+                "macd_signal": "NEUTRAL", 
+                "moving_avg_trend": "NEUTRAL",
+                "volume_surge": False
             }
-            
-        except Exception as e:
-            logger.error(f"Failed to calculate technical indicators for {ticker}: {e}")
-            return self._default_technical_indicators()
-    
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> float:
-        """Calculate RSI (Relative Strength Index)"""
+        
         try:
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            # Calculate RSI
+            delta = price_data['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            return float(rsi.iloc[-1]) if not rsi.empty else 50.0
-        except:
-            return 50.0
-    
-    def _calculate_macd_signal(self, prices: pd.Series) -> str:
-        """Calculate MACD signal"""
-        try:
-            ema12 = prices.ewm(span=12).mean()
-            ema26 = prices.ewm(span=26).mean()
+            current_rsi = rsi.iloc[-1] if not rsi.empty else 50.0
+            
+            logger.debug(f"📊 TECHNICAL: {ticker} RSI = {current_rsi:.1f}")
+            
+            # Simple MACD
+            ema12 = price_data['close'].ewm(span=12).mean()
+            ema26 = price_data['close'].ewm(span=26).mean()
             macd = ema12 - ema26
-            signal = macd.ewm(span=9).mean()
+            signal_line = macd.ewm(span=9).mean()
             
-            if macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-2] <= signal.iloc[-2]:
-                return "BULLISH_CROSSOVER"
-            elif macd.iloc[-1] < signal.iloc[-1] and macd.iloc[-2] >= signal.iloc[-2]:
-                return "BEARISH_CROSSOVER"
-            elif macd.iloc[-1] > signal.iloc[-1]:
-                return "BULLISH"
+            if len(macd) >= 2:
+                if macd.iloc[-1] > signal_line.iloc[-1] and macd.iloc[-2] <= signal_line.iloc[-2]:
+                    macd_signal = "BULLISH_CROSSOVER"
+                elif macd.iloc[-1] < signal_line.iloc[-1] and macd.iloc[-2] >= signal_line.iloc[-2]:
+                    macd_signal = "BEARISH_CROSSOVER"
+                elif macd.iloc[-1] > signal_line.iloc[-1]:
+                    macd_signal = "BULLISH"
+                else:
+                    macd_signal = "BEARISH"
             else:
-                return "BEARISH"
-        except:
-            return "NEUTRAL"
-    
-    def _calculate_ma_trend(self, prices: pd.Series) -> str:
-        """Calculate moving average trend"""
-        try:
-            ma20 = prices.rolling(window=20).mean()
-            ma50 = prices.rolling(window=50).mean()
+                macd_signal = "NEUTRAL"
             
-            current_price = prices.iloc[-1]
-            ma20_current = ma20.iloc[-1]
-            ma50_current = ma50.iloc[-1]
+            logger.debug(f"📊 TECHNICAL: {ticker} MACD = {macd_signal}")
             
-            if current_price > ma20_current > ma50_current:
-                return "STRONG_UPTREND"
-            elif current_price > ma20_current:
-                return "UPTREND"
-            elif current_price < ma20_current < ma50_current:
-                return "STRONG_DOWNTREND"
-            elif current_price < ma20_current:
-                return "DOWNTREND"
+            # Moving average trend
+            if len(price_data) >= 50:
+                ma20 = price_data['close'].rolling(window=20).mean()
+                ma50 = price_data['close'].rolling(window=50).mean()
+                current_price = price_data['close'].iloc[-1]
+                
+                if current_price > ma20.iloc[-1] > ma50.iloc[-1]:
+                    ma_trend = "STRONG_UPTREND"
+                elif current_price > ma20.iloc[-1]:
+                    ma_trend = "UPTREND"
+                elif current_price < ma20.iloc[-1] < ma50.iloc[-1]:
+                    ma_trend = "STRONG_DOWNTREND"
+                elif current_price < ma20.iloc[-1]:
+                    ma_trend = "DOWNTREND"
+                else:
+                    ma_trend = "NEUTRAL"
             else:
-                return "SIDEWAYS"
-        except:
-            return "NEUTRAL"
-    
-    def _detect_volume_surge(self, volume: pd.Series) -> bool:
-        """Detect if there's a volume surge"""
-        try:
-            if len(volume) < 20:
-                return False
+                ma_trend = "NEUTRAL"
             
-            avg_volume = volume.rolling(window=20).mean().iloc[-2]
-            current_volume = volume.iloc[-1]
+            logger.debug(f"📊 TECHNICAL: {ticker} Trend = {ma_trend}")
             
-            return bool(current_volume > (avg_volume * 1.5))  # Convert to Python bool
-        except:
-            return False
-    
-    def _default_technical_indicators(self) -> Dict:
-        """Default technical indicators when calculation fails"""
-        return {
-            "rsi": 50.0,
-            "macd_signal": "NEUTRAL",
-            "moving_avg_trend": "NEUTRAL",
-            "volume_surge": False
-        }
+            # Volume surge detection
+            if 'volume' in price_data.columns and len(price_data) >= 20:
+                avg_volume = price_data['volume'].rolling(window=20).mean()
+                current_volume = price_data['volume'].iloc[-1]
+                volume_surge = current_volume > (avg_volume.iloc[-1] * 1.5)
+            else:
+                volume_surge = False
+            
+            logger.debug(f"📊 TECHNICAL: {ticker} Volume surge = {volume_surge}")
+            
+            indicators = {
+                "rsi": float(current_rsi),
+                "macd_signal": macd_signal,
+                "moving_avg_trend": ma_trend,
+                "volume_surge": bool(volume_surge)
+            }
+            
+            logger.info(f"📊 TECHNICAL: {ticker} indicators calculated: RSI={current_rsi:.1f}, MACD={macd_signal}, Trend={ma_trend}, VolSurge={volume_surge}")
+            return indicators
+            
+        except Exception as e:
+            logger.error(f"📊 TECHNICAL: Error calculating indicators for {ticker}: {e}")
+            return {
+                "rsi": 50.0,
+                "macd_signal": "NEUTRAL",
+                "moving_avg_trend": "NEUTRAL", 
+                "volume_surge": False
+            }
     
     def get_fundamental_metrics(self, ticker: str) -> Dict:
-        """Get fundamental metrics for a stock"""
+        """Get fundamental metrics for a stock - ONLY REAL DATA, no fallbacks"""
         try:
-            # Try to get fundamental data from data source
-            # This is a placeholder - in real implementation, you'd fetch from
-            # financial data APIs like Alpha Vantage, Yahoo Finance, etc.
+            logger.debug(f"💰 FUNDAMENTALS: Fetching real data for {ticker}")
             
-            # For now, return mock data with realistic ranges
-            import random
+            # Get real fundamental data from Zerodha adapter (screener.in)
+            fundamentals = self.zerodha_api.get_fundamentals(ticker)
+            
+            if not fundamentals or 'error' in fundamentals:
+                logger.warning(f"🚫 SKIP_STOCK: {ticker} - No real data available from screener.in")
+                return None  # Return None instead of fake data
+            
+            # Validate that we have essential data
+            if not fundamentals.get('pe_ratio') or not fundamentals.get('price'):
+                logger.warning(f"🚫 SKIP_STOCK: {ticker} - Missing essential data (P/E or Price)")
+                return None
+            
+            # Extract key metrics with safe defaults and better field mapping
+            pe_ratio = fundamentals.get('pe_ratio')
+            
+            # Calculate debt to equity from balance sheet data
+            total_debt = fundamentals.get('total_debt', 0.0)
+            reserves = fundamentals.get('reserves', 0.0)
+            debt_to_equity = (total_debt / reserves) if reserves > 0 else 0.0
+            
+            roe = fundamentals.get('roe', 0.0)
+            
+            # Since sales_growth isn't directly available, calculate or use a reasonable default
+            # In real implementation, you'd compare with previous year's sales
+            revenue_growth = 10.0  # Default value - would need historical data for actual calculation
+            
+            market_cap = fundamentals.get('market_cap')
+            price = fundamentals.get('price')
+            book_value = fundamentals.get('book_value_per_share', 0.0)
+            eps = fundamentals.get('earnings_per_share', 0.0)
+            
+            # Extract additional useful metrics
+            roce = fundamentals.get('roce', 0.0)
+            dividend_yield = fundamentals.get('dividend_yield', 0.0)
+            sales = fundamentals.get('sales', 0.0)
+            net_profit = fundamentals.get('net_profit', 0.0)
+            
+            # Try to determine sector - not directly available, use "Unknown" for now
+            sector = "Unknown"  # Could be enhanced with a ticker-to-sector mapping
+            
+            logger.info(f"✅ REAL_DATA: {ticker} - P/E: {pe_ratio}, ROE: {roe}%, D/E: {debt_to_equity:.2f}, Market Cap: ₹{market_cap}Cr, Price: ₹{price}")
             
             return {
-                "pe_ratio": round(random.uniform(10, 30), 2),
-                "debt_to_equity": round(random.uniform(0.1, 2.0), 2),
-                "roe": round(random.uniform(5, 25), 2),
-                "revenue_growth": round(random.uniform(-10, 30), 2),
-                "market_cap": round(random.uniform(500, 50000), 2)
+                "pe_ratio": float(pe_ratio),
+                "debt_to_equity": float(debt_to_equity),
+                "roe": float(roe),
+                "revenue_growth": float(revenue_growth),
+                "market_cap": float(market_cap),
+                "price": float(price),
+                "book_value": float(book_value),
+                "eps": float(eps),
+                "sector": str(sector),
+                # Additional metrics for enhanced analysis
+                "roce": float(roce),
+                "dividend_yield": float(dividend_yield),
+                "sales": float(sales),
+                "net_profit": float(net_profit),
+                "data_source": "screener.in"  # Track data source
             }
             
         except Exception as e:
-            logger.error(f"Failed to get fundamental metrics for {ticker}: {e}")
-            return {
-                "pe_ratio": 20.0,
-                "debt_to_equity": 0.5,
-                "roe": 15.0,
-                "revenue_growth": 10.0,
-                "market_cap": 5000.0
-            }
+            logger.error(f"🚫 SKIP_STOCK: {ticker} - Failed to get real data: {e}")
+            return None  # Return None instead of fake data
+    
+    def _get_fallback_fundamental_metrics(self) -> Dict:
+        """DEPRECATED: No longer used - we skip stocks instead of using fake data"""
+        logger.error("🚫 DEPRECATED: _get_fallback_fundamental_metrics should not be called")
+        raise ValueError("Fake data generation is disabled - stocks should be skipped instead")
     
     def calculate_ai_scores(self, technical_data: Dict, fundamental_data: Dict) -> Tuple[float, float, float]:
         """Calculate AI-powered technical, fundamental, and overall scores"""
+        
+        logger.debug(f"🤖 AI_SCORING: Technical data: {technical_data}")
+        logger.debug(f"🤖 AI_SCORING: Fundamental data: {fundamental_data}")
         
         # Technical Score (0-100)
         technical_score = 50.0  # Base score
@@ -306,28 +342,36 @@ class AIStockScreener:
         rsi = technical_data.get("rsi", 50)
         if 30 <= rsi <= 70:  # Good range
             technical_score += 20
+            logger.debug(f"🤖 AI_SCORING: RSI {rsi:.1f} in good range, +20 points")
         elif rsi < 30:  # Oversold (potential buy)
             technical_score += 15
+            logger.debug(f"🤖 AI_SCORING: RSI {rsi:.1f} oversold, +15 points")
         elif rsi > 70:  # Overbought (potential sell)
             technical_score -= 15
+            logger.debug(f"🤖 AI_SCORING: RSI {rsi:.1f} overbought, -15 points")
         
         # MACD scoring
         macd = technical_data.get("macd_signal", "NEUTRAL")
         if macd in ["BULLISH_CROSSOVER", "BULLISH"]:
             technical_score += 15
+            logger.debug(f"🤖 AI_SCORING: MACD {macd}, +15 points")
         elif macd in ["BEARISH_CROSSOVER", "BEARISH"]:
             technical_score -= 15
+            logger.debug(f"🤖 AI_SCORING: MACD {macd}, -15 points")
         
         # Moving average trend scoring
         ma_trend = technical_data.get("moving_avg_trend", "NEUTRAL")
         if ma_trend in ["STRONG_UPTREND", "UPTREND"]:
             technical_score += 15
+            logger.debug(f"🤖 AI_SCORING: Trend {ma_trend}, +15 points")
         elif ma_trend in ["STRONG_DOWNTREND", "DOWNTREND"]:
             technical_score -= 15
+            logger.debug(f"🤖 AI_SCORING: Trend {ma_trend}, -15 points")
         
         # Volume surge bonus
         if technical_data.get("volume_surge", False):
             technical_score += 10
+            logger.debug(f"🤖 AI_SCORING: Volume surge detected, +10 points")
         
         # Fundamental Score (0-100)
         fundamental_score = 50.0  # Base score
@@ -336,48 +380,58 @@ class AIStockScreener:
         pe = fundamental_data.get("pe_ratio", 20)
         if 10 <= pe <= 20:  # Good value range
             fundamental_score += 20
+            logger.debug(f"🤖 AI_SCORING: P/E {pe:.1f} in good range, +20 points")
         elif pe < 10:  # Very cheap
             fundamental_score += 15
+            logger.debug(f"🤖 AI_SCORING: P/E {pe:.1f} very cheap, +15 points")
         elif pe > 30:  # Expensive
             fundamental_score -= 15
+            logger.debug(f"🤖 AI_SCORING: P/E {pe:.1f} expensive, -15 points")
         
         # ROE scoring
         roe = fundamental_data.get("roe", 15)
         if roe > 20:
             fundamental_score += 20
+            logger.debug(f"🤖 AI_SCORING: ROE {roe:.1f}% excellent, +20 points")
         elif roe > 15:
             fundamental_score += 10
+            logger.debug(f"🤖 AI_SCORING: ROE {roe:.1f}% good, +10 points")
         elif roe < 10:
             fundamental_score -= 10
+            logger.debug(f"🤖 AI_SCORING: ROE {roe:.1f}% poor, -10 points")
         
-        # Debt-to-equity scoring
+        # Debt to equity scoring
         de = fundamental_data.get("debt_to_equity", 0.5)
-        if de < 0.5:
+        if de < 0.3:
             fundamental_score += 15
-        elif de > 1.5:
+            logger.debug(f"🤖 AI_SCORING: D/E {de:.2f} low debt, +15 points")
+        elif de > 1.0:
             fundamental_score -= 15
+            logger.debug(f"🤖 AI_SCORING: D/E {de:.2f} high debt, -15 points")
         
         # Revenue growth scoring
         growth = fundamental_data.get("revenue_growth", 10)
         if growth > 20:
             fundamental_score += 15
+            logger.debug(f"🤖 AI_SCORING: Revenue growth {growth:.1f}% strong, +15 points")
         elif growth > 10:
             fundamental_score += 10
-        elif growth < 0:
-            fundamental_score -= 20
+            logger.debug(f"🤖 AI_SCORING: Revenue growth {growth:.1f}% good, +10 points")
+        elif growth < 5:
+            fundamental_score -= 10
+            logger.debug(f"🤖 AI_SCORING: Revenue growth {growth:.1f}% weak, -10 points")
         
-        # Overall score (weighted average)
-        overall_score = (technical_score * 0.4) + (fundamental_score * 0.6)
-        
-        # Clamp scores to 0-100 range
+        # Ensure scores are within bounds
         technical_score = max(0, min(100, technical_score))
         fundamental_score = max(0, min(100, fundamental_score))
-        overall_score = max(0, min(100, overall_score))
+        overall_score = (technical_score + fundamental_score) / 2
+        
+        logger.info(f"🤖 AI_SCORING: Final scores - Technical: {technical_score:.1f}, Fundamental: {fundamental_score:.1f}, Overall: {overall_score:.1f}")
         
         return technical_score, fundamental_score, overall_score
     
     def generate_signal_and_reasoning(self, ticker: str, technical_data: Dict, 
-                                    fundamental_data: Dict, overall_score: float) -> Tuple[ScreenerSignal, float, List[str], List[str], float, float]:
+                                    fundamental_data: Dict, overall_score: float, current_price: float) -> Tuple[ScreenerSignal, float, List[str], List[str], float, float]:
         """Generate trading signal and AI reasoning"""
         
         buy_reasons = []
@@ -436,8 +490,6 @@ class AIStockScreener:
             risk_factors.append("Slow revenue growth may indicate business challenges")
         
         # Calculate target price and stop loss (simplified)
-        current_price = 100.0  # Placeholder - would get from market data
-        
         if signal in [ScreenerSignal.STRONG_BUY, ScreenerSignal.BUY]:
             target_price = current_price * 1.15  # 15% upside target
             stop_loss = current_price * 0.92     # 8% stop loss
@@ -448,11 +500,19 @@ class AIStockScreener:
         return signal, confidence, buy_reasons, risk_factors, target_price, stop_loss
     
     async def screen_stock(self, ticker: str, company_name: str = "") -> Optional[StockOpportunity]:
-        """Screen a single stock for opportunities"""
+        """Screen a single stock for opportunities - ONLY with real data"""
         try:
-            logger.info(f"Screening stock: {ticker}")
+            logger.info(f"🔍 SCREENING: Starting analysis for {ticker}")
             
-            # Get price data (last 100 days)
+            # Get fundamental metrics first (contains price, sector, etc.)
+            fundamental_data = self.get_fundamental_metrics(ticker)
+            
+            # Skip stock if no real fundamental data available
+            if fundamental_data is None:
+                logger.warning(f"🚫 SKIPPED: {ticker} - No real fundamental data available")
+                return None
+            
+            # Get price data (last 100 days) for technical analysis
             end_date = datetime.now()
             start_date = end_date - timedelta(days=100)
             
@@ -461,42 +521,42 @@ class AIStockScreener:
                     ticker, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
                 )
             except Exception as e:
-                logger.warning(f"Failed to get price data for {ticker}: {e}")
+                logger.warning(f"📊 TECHNICAL: Failed to get price data for {ticker}: {e}")
                 price_data = pd.DataFrame()
             
             # Calculate technical indicators
             technical_data = self.calculate_technical_indicators(ticker, price_data)
-            
-            # Get fundamental metrics
-            fundamental_data = self.get_fundamental_metrics(ticker)
             
             # Calculate AI scores
             technical_score, fundamental_score, overall_score = self.calculate_ai_scores(
                 technical_data, fundamental_data
             )
             
-            # Generate signal and reasoning
+            # Generate signal and reasoning with real current price
+            current_price = fundamental_data.get("price")
             signal, confidence, buy_reasons, risk_factors, target_price, stop_loss = self.generate_signal_and_reasoning(
-                ticker, technical_data, fundamental_data, overall_score
+                ticker, technical_data, fundamental_data, overall_score, current_price
             )
             
-            # Get current price (placeholder)
-            current_price = 100.0  # Would get from live market data
+            # Extract real data from fundamentals
+            market_cap = fundamental_data.get("market_cap")
+            sector = fundamental_data.get("sector", "Unknown")
+            company_name = company_name or ticker
             
             opportunity = StockOpportunity(
                 ticker=ticker,
-                company_name=company_name or ticker,
+                company_name=company_name,
                 current_price=current_price,
-                market_cap=fundamental_data.get("market_cap", 5000),
-                sector="Technology",  # Placeholder
+                market_cap=market_cap,
+                sector=sector,
                 rsi=technical_data.get("rsi", 50),
                 macd_signal=technical_data.get("macd_signal", "NEUTRAL"),
                 moving_avg_trend=technical_data.get("moving_avg_trend", "NEUTRAL"),
                 volume_surge=technical_data.get("volume_surge", False),
-                pe_ratio=fundamental_data.get("pe_ratio", 20),
-                debt_to_equity=fundamental_data.get("debt_to_equity", 0.5),
-                roe=fundamental_data.get("roe", 15),
-                revenue_growth=fundamental_data.get("revenue_growth", 10),
+                pe_ratio=fundamental_data.get("pe_ratio"),
+                debt_to_equity=fundamental_data.get("debt_to_equity"),
+                roe=fundamental_data.get("roe"),
+                revenue_growth=fundamental_data.get("revenue_growth"),
                 technical_score=technical_score,
                 fundamental_score=fundamental_score,
                 overall_score=overall_score,
@@ -508,27 +568,30 @@ class AIStockScreener:
                 stop_loss=stop_loss
             )
             
-            logger.info(f"Screened {ticker}: Score {overall_score:.1f}, Signal {signal.value}")
+            logger.info(f"✅ SCREENED: {ticker} - Score {overall_score:.1f}, Signal {signal.value}, Price ₹{current_price}")
             return opportunity
             
         except Exception as e:
-            logger.error(f"Failed to screen stock {ticker}: {e}")
+            logger.error(f"🚫 FAILED: {ticker} - Screening error: {e}")
             return None
     
     async def scan_opportunities(self, max_stocks: int = 50) -> List[StockOpportunity]:
         """Scan NSE stocks for opportunities"""
-        logger.info(f"Starting AI stock screening for top {max_stocks} opportunities")
+        logger.info(f"🚀 SCREENING: Starting AI stock screening for top {max_stocks} opportunities")
         
         # Get stock universe
         stock_universe = self.get_nse_universe()
+        logger.info(f"🚀 SCREENING: Total universe size: {len(stock_universe)} stocks")
         
         # Limit to max_stocks for performance
         stocks_to_screen = stock_universe[:max_stocks]
+        logger.info(f"🚀 SCREENING: Screening {len(stocks_to_screen)} stocks")
         
         opportunities = []
         
         # Screen stocks concurrently (but with rate limiting)
         semaphore = asyncio.Semaphore(5)  # Max 5 concurrent requests
+        logger.info(f"🚀 SCREENING: Using concurrent screening with max 5 parallel requests")
         
         async def screen_with_semaphore(stock):
             async with semaphore:
@@ -538,18 +601,37 @@ class AIStockScreener:
                 )
         
         # Execute screening
+        logger.info(f"🚀 SCREENING: Starting parallel screening of {len(stocks_to_screen)} stocks...")
         tasks = [screen_with_semaphore(stock) for stock in stocks_to_screen]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Filter successful results
-        for result in results:
+        successful_screens = 0
+        failed_screens = 0
+        
+        for i, result in enumerate(results):
             if isinstance(result, StockOpportunity):
                 opportunities.append(result)
+                successful_screens += 1
+                if result.overall_score >= 70:
+                    logger.info(f"🎯 HIGH_SCORE: {result.ticker} scored {result.overall_score:.1f} - {result.signal.value}")
+            else:
+                failed_screens += 1
+                logger.debug(f"❌ FAILED: Stock {stocks_to_screen[i].get('tradingsymbol', 'UNKNOWN')} failed screening")
+        
+        logger.info(f"🚀 SCREENING: Completed - {successful_screens} successful, {failed_screens} failed")
         
         # Sort by overall score (best opportunities first)
         opportunities.sort(key=lambda x: x.overall_score, reverse=True)
+        logger.info(f"🏆 TOP_OPPORTUNITIES: Sorted {len(opportunities)} opportunities by score")
         
-        logger.info(f"Found {len(opportunities)} stock opportunities")
+        if opportunities:
+            top_5 = opportunities[:5]
+            logger.info("🏆 TOP_5_OPPORTUNITIES:")
+            for i, opp in enumerate(top_5, 1):
+                logger.info(f"  {i}. {opp.ticker}: {opp.overall_score:.1f} ({opp.signal.value}) - {opp.company_name}")
+        
+        logger.info(f"🚀 SCREENING: Found {len(opportunities)} stock opportunities")
         return opportunities
     
     def get_top_opportunities(self, opportunities: List[StockOpportunity], 

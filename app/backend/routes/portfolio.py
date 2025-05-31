@@ -9,6 +9,7 @@ from typing import Dict, Optional
 import asyncio
 import os
 import sys
+from datetime import datetime
 
 # Add src to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -34,37 +35,22 @@ async def get_portfolio_summary() -> Dict:
         raise HTTPException(status_code=500, detail=f"Failed to get portfolio summary: {str(e)}")
 
 @router.get("/positions")
-async def get_portfolio_positions() -> Dict:
+async def get_positions():
     """
-    Get detailed portfolio positions
+    Get current trading positions
     """
     try:
         portfolio_monitor = get_portfolio_monitor()
-        snapshot = portfolio_monitor.get_portfolio_snapshot()
-        
-        if not snapshot:
-            raise HTTPException(status_code=500, detail="Failed to fetch portfolio data")
+        positions = portfolio_monitor.get_positions()
         
         return {
-            "timestamp": snapshot.timestamp.isoformat(),
-            "positions": [
-                {
-                    "ticker": pos.ticker,
-                    "quantity": pos.quantity,
-                    "average_price": pos.average_price,
-                    "current_price": pos.current_price,
-                    "market_value": pos.market_value,
-                    "pnl": pos.pnl,
-                    "day_pnl": pos.day_pnl,
-                    "weight": pos.weight
-                }
-                for pos in snapshot.positions
-            ]
+            "positions": positions,
+            "count": len(positions),
+            "timestamp": datetime.now().isoformat()
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get portfolio positions: {str(e)}")
+        logger.error(f"Failed to get positions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/cash")
 async def get_cash_balance() -> Dict:
@@ -230,4 +216,22 @@ async def portfolio_health_check() -> Dict:
             "zerodha_connected": False,
             "scheduler_running": False,
             "data_accessible": False
-        } 
+        }
+
+@router.get("/holdings")
+async def get_holdings():
+    """
+    Get long-term equity holdings
+    """
+    try:
+        portfolio_monitor = get_portfolio_monitor()
+        holdings = portfolio_monitor.get_holdings()
+        
+        return {
+            "holdings": holdings,
+            "count": len(holdings),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get holdings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 

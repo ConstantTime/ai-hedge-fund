@@ -227,20 +227,20 @@ export const Portfolio: React.FC = () => {
             {currentData.day_pnl >= 0 ? <TrendingUp className="h-4 w-4 text-green-600" /> : <TrendingDown className="h-4 w-4 text-red-600" />}
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${currentData.day_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {formatCurrency(currentData.day_pnl)}
-            </div>
-            <p className="text-xs text-muted-foreground">Today's change</p>
+            <div className="text-2xl font-bold">{formatCurrency(currentData.day_pnl)}</div>
+            <p className={`text-xs ${currentData.day_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              Today's change
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Positions Table */}
-      {portfolioData?.positions && portfolioData.positions.length > 0 && (
+      {/* Holdings Table */}
+      {portfolioData && portfolioData.positions && portfolioData.positions.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Current Positions</CardTitle>
-            <CardDescription>Your active stock positions</CardDescription>
+            <CardTitle>Holdings & Positions</CardTitle>
+            <CardDescription>Your equity holdings and trading positions</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -248,17 +248,18 @@ export const Portfolio: React.FC = () => {
                 <thead>
                   <tr className="border-b">
                     <th className="text-left p-2">Symbol</th>
-                    <th className="text-right p-2">Quantity</th>
+                    <th className="text-right p-2">Qty</th>
                     <th className="text-right p-2">Avg Price</th>
                     <th className="text-right p-2">Current Price</th>
                     <th className="text-right p-2">Market Value</th>
                     <th className="text-right p-2">P&L</th>
-                    <th className="text-right p-2">Weight</th>
+                    <th className="text-right p-2">Day P&L</th>
+                    <th className="text-right p-2">Weight %</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {portfolioData.positions.map((position) => (
-                    <tr key={position.ticker} className="border-b">
+                  {portfolioData.positions.map((position, index) => (
+                    <tr key={index} className="border-b hover:bg-gray-50">
                       <td className="p-2 font-medium">{position.ticker}</td>
                       <td className="text-right p-2">{position.quantity}</td>
                       <td className="text-right p-2">{formatCurrency(position.average_price)}</td>
@@ -266,6 +267,9 @@ export const Portfolio: React.FC = () => {
                       <td className="text-right p-2">{formatCurrency(position.market_value)}</td>
                       <td className={`text-right p-2 ${position.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(position.pnl)}
+                      </td>
+                      <td className={`text-right p-2 ${position.day_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(position.day_pnl)}
                       </td>
                       <td className="text-right p-2">{position.weight.toFixed(1)}%</td>
                     </tr>
@@ -277,8 +281,8 @@ export const Portfolio: React.FC = () => {
         </Card>
       )}
 
-      {/* Top Positions */}
-      {'top_positions' in currentData && currentData.top_positions && currentData.top_positions.length > 0 && (
+      {/* Top Holdings (if no detailed positions available) */}
+      {summary && summary.top_positions && summary.top_positions.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Top Holdings</CardTitle>
@@ -286,22 +290,19 @@ export const Portfolio: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {currentData.top_positions.map((position, index) => (
-                <div key={position.ticker} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium">{position.ticker}</p>
-                      <p className="text-sm text-muted-foreground">{position.weight.toFixed(1)}% of portfolio</p>
+              {summary.top_positions.map((holding, index) => (
+                <div key={index} className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">{holding.ticker}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {formatCurrency(holding.market_value)}
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium">{formatCurrency(position.market_value)}</p>
-                    <p className={`text-sm ${position.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {formatCurrency(position.pnl)}
-                    </p>
+                    <div className="font-medium">{holding.weight.toFixed(1)}%</div>
+                    <div className={`text-sm ${holding.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(holding.pnl)}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -312,8 +313,12 @@ export const Portfolio: React.FC = () => {
 
       {error && (
         <Card className="border-red-200">
-          <CardContent className="p-4">
-            <div className="text-red-600 text-sm">{error}</div>
+          <CardContent className="p-6">
+            <div className="text-red-600 font-medium">Error</div>
+            <div className="text-red-500 text-sm mt-1">{error}</div>
+            <Button onClick={refreshPortfolio} size="sm" className="mt-3">
+              Retry
+            </Button>
           </CardContent>
         </Card>
       )}

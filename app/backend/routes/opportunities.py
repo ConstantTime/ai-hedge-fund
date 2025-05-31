@@ -93,16 +93,19 @@ async def _background_scan(max_stocks: int):
 
 @router.get("/list")
 async def list_opportunities(
-    signal: Optional[str] = Query(default=None, description="Filter by signal (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL)"),
+    signal: Optional[str] = Query(default=None, description="Filter by signal (all, STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL)"),
     min_score: float = Query(default=60.0, ge=0, le=100, description="Minimum overall score"),
     limit: int = Query(default=10, ge=1, le=50, description="Maximum number of results"),
     sector: Optional[str] = Query(default=None, description="Filter by sector")
 ):
     """
-    Get list of current opportunities with filtering
+    List filtered opportunities with pagination
     """
     try:
+        logger.info(f"Listing opportunities with filters: signal={signal}, min_score={min_score}, sector={sector}, limit={limit}")
+        
         if not _opportunities_cache:
+            logger.warning("No opportunities in cache")
             return {
                 "opportunities": [],
                 "message": "No opportunities available. Run /scan first.",
@@ -110,24 +113,28 @@ async def list_opportunities(
             }
         
         # Apply filters
-        filtered_opportunities = _opportunities_cache
+        filtered_opportunities = _opportunities_cache[:]  # Create a copy
+        logger.info(f"Starting with {len(filtered_opportunities)} opportunities in cache")
         
-        # Filter by signal
-        if signal:
+        # Filter by signal (handle 'all' as special case)
+        if signal and signal.lower() != 'all':
             try:
                 signal_enum = ScreenerSignal(signal.upper())
                 filtered_opportunities = [
                     opp for opp in filtered_opportunities 
                     if opp.signal == signal_enum
                 ]
+                logger.info(f"After signal filter ({signal}): {len(filtered_opportunities)} opportunities")
             except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid signal: {signal}")
+                logger.error(f"Invalid signal value: {signal}")
+                raise HTTPException(status_code=400, detail=f"Invalid signal: {signal}. Valid values: all, STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL")
         
         # Filter by minimum score
         filtered_opportunities = [
             opp for opp in filtered_opportunities 
             if opp.overall_score >= min_score
         ]
+        logger.info(f"After score filter (>={min_score}): {len(filtered_opportunities)} opportunities")
         
         # Filter by sector
         if sector:
@@ -135,13 +142,27 @@ async def list_opportunities(
                 opp for opp in filtered_opportunities 
                 if sector.lower() in opp.sector.lower()
             ]
+            logger.info(f"After sector filter ({sector}): {len(filtered_opportunities)} opportunities")
         
         # Apply limit
         filtered_opportunities = filtered_opportunities[:limit]
+        logger.info(f"After limit ({limit}): {len(filtered_opportunities)} opportunities")
+        
+        # Convert to dict format
+        opportunities_dict = []
+        for opp in filtered_opportunities:
+            try:
+                opp_dict = opp.to_dict()
+                opportunities_dict.append(opp_dict)
+            except Exception as e:
+                logger.error(f"Error converting opportunity {opp.ticker} to dict: {e}")
+                continue
+        
+        logger.info(f"Successfully returning {len(opportunities_dict)} opportunities")
         
         return {
-            "opportunities": [opp.to_dict() for opp in filtered_opportunities],
-            "total_found": len(filtered_opportunities),
+            "opportunities": opportunities_dict,
+            "total_found": len(opportunities_dict),
             "total_scanned": len(_opportunities_cache),
             "last_scan": _last_scan_time.isoformat() if _last_scan_time else None,
             "filters_applied": {
@@ -152,8 +173,10 @@ async def list_opportunities(
             }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to list opportunities: {e}")
+        logger.error(f"Failed to list opportunities: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to list opportunities: {str(e)}")
 
 @router.get("/top")
@@ -281,4 +304,22 @@ async def stream_opportunities():
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
         }
-    ) 
+    )
+
+@router.delete("/cache")
+async def clear_cache():
+    """
+    Clear the opportunities cache
+    """
+    global _opportunities_cache, _last_scan_time
+    
+    _opportunities_cache.clear()
+    _last_scan_time = None
+    
+    logger.info("Opportunities cache cleared manually")
+    
+    return {
+        "status": "cache_cleared",
+        "message": "Opportunities cache has been cleared",
+        "timestamp": datetime.now().isoformat()
+    } 

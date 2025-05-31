@@ -112,11 +112,10 @@ class ZerodhaPortfolioMonitor:
             return 0.0
     
     def get_positions(self) -> List[Dict]:
-        """Get current positions from Zerodha"""
+        """Get current trading positions (intraday/F&O)"""
         if not self.kite:
-            logger.error("Kite client not initialized")
             return []
-            
+        
         try:
             positions = self.kite.positions()
             # Return net positions (consolidated view)
@@ -132,6 +131,26 @@ class ZerodhaPortfolioMonitor:
             return active_positions
         except Exception as e:
             logger.error(f"Failed to fetch positions: {e}")
+            return []
+    
+    def get_holdings(self) -> List[Dict]:
+        """Get long-term equity holdings"""
+        if not self.kite:
+            return []
+        
+        try:
+            holdings = self.kite.holdings()
+            
+            # Filter out zero quantity holdings
+            active_holdings = [
+                holding for holding in holdings 
+                if holding.get('quantity', 0) != 0
+            ]
+            
+            logger.info(f"Found {len(active_holdings)} holdings")
+            return active_holdings
+        except Exception as e:
+            logger.error(f"Failed to fetch holdings: {e}")
             return []
     
     def get_current_prices(self, tickers: List[str]) -> Dict[str, float]:
@@ -176,10 +195,13 @@ class ZerodhaPortfolioMonitor:
             # Get cash balance
             cash = self.get_cash()
             
-            # Get positions
+            # Get positions (intraday/F&O)
             raw_positions = self.get_positions()
             
-            if not raw_positions:
+            # Get holdings (long-term equity)
+            raw_holdings = self.get_holdings()
+            
+            if not raw_positions and not raw_holdings:
                 # Portfolio with only cash
                 return PortfolioSnapshot(
                     timestamp=datetime.now(),
@@ -191,9 +213,16 @@ class ZerodhaPortfolioMonitor:
                     positions=[]
                 )
             
-            # Get current prices for all position tickers
-            tickers = [pos['tradingsymbol'] for pos in raw_positions]
-            current_prices = self.get_current_prices(tickers)
+            # Combine positions and holdings for current price lookup
+            all_tickers = []
+            if raw_positions:
+                all_tickers.extend([pos['tradingsymbol'] for pos in raw_positions])
+            if raw_holdings:
+                all_tickers.extend([holding['tradingsymbol'] for holding in raw_holdings])
+            
+            # Remove duplicates
+            all_tickers = list(set(all_tickers))
+            current_prices = self.get_current_prices(all_tickers)
             
             # Calculate position metrics
             portfolio_positions = []
@@ -201,15 +230,44 @@ class ZerodhaPortfolioMonitor:
             total_pnl = 0.0
             total_day_pnl = 0.0
             
+            # Process trading positions
             for pos in raw_positions:
                 ticker = pos['tradingsymbol']
                 quantity = pos['quantity']
                 avg_price = pos['average_price']
-                current_price = current_prices.get(ticker, avg_price)  # Fallback to avg_price
+                current_price = current_prices.get(ticker, avg_price)
                 
                 market_value = quantity * current_price
                 pnl = pos.get('pnl', 0.0)
                 day_pnl = pos.get('day_pnl', 0.0)
+                
+                total_invested_value += abs(market_value)
+                total_pnl += pnl
+                total_day_pnl += day_pnl
+                
+                portfolio_positions.append(PortfolioPosition(
+                    ticker=ticker,
+                    quantity=quantity,
+                    average_price=avg_price,
+                    current_price=current_price,
+                    pnl=pnl,
+                    day_pnl=day_pnl,
+                    market_value=market_value,
+                    weight=0.0  # Will calculate after total_value
+                ))
+            
+            # Process holdings (long-term equity)
+            for holding in raw_holdings:
+                ticker = holding['tradingsymbol']
+                quantity = holding['quantity']
+                avg_price = holding['average_price']
+                current_price = current_prices.get(ticker, avg_price)
+                
+                market_value = quantity * current_price
+                invested_amount = quantity * avg_price
+                pnl = market_value - invested_amount
+                # Holdings don't have day P&L in the same way as positions
+                day_pnl = holding.get('day_change', 0.0) * quantity
                 
                 total_invested_value += abs(market_value)
                 total_pnl += pnl
@@ -243,6 +301,7 @@ class ZerodhaPortfolioMonitor:
             )
             
             logger.info(f"Portfolio snapshot: Total value ₹{total_value:,.2f}, Cash ₹{cash:,.2f}, Invested ₹{total_invested_value:,.2f}")
+            logger.info(f"Positions: {len(raw_positions)}, Holdings: {len(raw_holdings)}, Total instruments: {len(portfolio_positions)}")
             return snapshot
             
         except Exception as e:
