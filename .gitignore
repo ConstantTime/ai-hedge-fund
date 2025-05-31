@@ -57,3 +57,4 @@ cache/backend.log
 *.log
 cache/
 app/backend/cache/
+PRIVATE_*.md
